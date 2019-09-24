@@ -35,6 +35,7 @@ import (
 	"github.com/skydive-project/skydive/topology/probes/opencontrail"
 	"github.com/skydive-project/skydive/topology/probes/ovsdb"
 	"github.com/skydive-project/skydive/topology/probes/runc"
+	"github.com/skydive-project/skydive/topology/probes/snmp"
 	"github.com/skydive-project/skydive/topology/probes/socketinfo"
 	"github.com/skydive-project/skydive/topology/probes/vpp"
 )
@@ -93,6 +94,8 @@ func NewTopologyProbeBundle(g *graph.Graph, hostNode *graph.Node) (*probe.Bundle
 			handler, err = new(libvirt.Probe).Init(ctx, bundle)
 		case "runc":
 			handler, err = new(runc.ProbeHandler).Init(ctx, bundle)
+		case "snmp":
+			handler, err = new(snmp.Probe).Init(ctx, bundle)
 		case "vpp":
 			handler, err = new(vpp.Probe).Init(ctx, bundle)
 		default:

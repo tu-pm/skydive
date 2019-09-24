@@ -246,7 +246,18 @@ var TopologyComponent = {
           <div v-show="currentNodeLastUpdateMetric && topologyTimeContext === 0">\
             <h2>Last metrics</h2>\
             <metrics-table :object="currentNodeLastUpdateMetric" :keys="globalVars[\'interface-metric-keys\']" \
-              :defaultKeys="[\'Last\', \'Start\', \'RxBytes\', \'RxPackets\', \'TxBytes\', \'TxPackets\']"></metrics-table>\
+              :defaultKeys="[\'Last\', \'RxBytes\', \'RxPackets\', \'TxBytes\', \'TxPackets\']"></metrics-table>\
+          </div>\
+        </panel>\
+        <panel id="total-chassis-metric" v-if="currentChassisNodeMetric"\
+               title="Chassis Metrics">\
+          <h2>Total metrics</h2>\
+          <metrics-table :object="currentChassisNodeMetric" :keys="globalVars[\'chassis-interface-metric-keys\']" \
+                :defaultKeys="[\'Last\',\'IfInUcastPkts\', \'IfInOctets\', \'IfOutUcastPkts\', \'IfOutOctets\']"></metrics-table>\
+          <div v-show="currentChassisNodeLastUpdateMetric && topologyTimeContext === 0">\
+            <h2>Last metrics</h2>\
+            <metrics-table :object="currentChassisNodeLastUpdateMetric" :keys="globalVars[\'chassis-interface-metric-keys\']" \
+                :defaultKeys="[\'Last\', \'Start\',\'IfInUcastPkts\', \'IfInOctets\', \'IfOutUcastPkts\', \'IfOutOctets\']"></metrics-table>\
           </div>\
         </panel>\
         <panel id="ovs-metric" v-if="currentNodeOvsMetric"\
@@ -463,7 +474,7 @@ var TopologyComponent = {
     currentNodeMetadata: function() {
       if (!this.currentNode) return null;
       return this.extractMetadata(this.currentNode.metadata,
-        ['LastUpdateMetric', 'Metric', 'Ovs.Metric', 'Ovs.LastUpdateMetric', 'SFlow.Metric', 'SFlow.LastUpdateMetric', 'RoutingTables', 'Features', 'K8s.Extra', 'Docker']);
+        ['LastUpdateMetric', 'Metric', 'Ovs.Metric', 'Ovs.LastUpdateMetric', 'SFlow.Metric', 'SFlow.LastUpdateMetric', 'RoutingTables', 'Features', 'K8s.Extra', 'Docker', 'ChassisIfMetric', 'LastUpdateChassisIfMetric']);
     },
 
     currentNodeFlowsQuery: function() {
@@ -512,6 +523,17 @@ var TopologyComponent = {
       if (!this.currentNodeMetadata || !this.currentNode.metadata.LastUpdateMetric) return null;
       return this.normalizeMetric(this.currentNode.metadata.LastUpdateMetric);
     },
+
+    currentChassisNodeMetric: function() {
+      if (!this.currentNodeMetadata || !this.currentNode.metadata.ChassisIfMetric) return null;
+      return this.normalizeMetric(this.currentNode.metadata.ChassisIfMetric);
+    },
+
+    currentChassisNodeLastUpdateMetric: function() {
+      if (!this.currentNodeMetadata || !this.currentNode.metadata.LastUpdateChassisIfMetric) return null;
+      return this.normalizeMetric(this.currentNode.metadata.LastUpdateChassisIfMetric);
+    },
+
 
     currentNodeOvsMetric: function() {
       if (!this.currentNodeMetadata || !this.currentNode.metadata.Ovs || !this.currentNode.metadata.Ovs.Metric) return null;

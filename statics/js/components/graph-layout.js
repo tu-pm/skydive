@@ -30,6 +30,31 @@ var LinkLabelBandwidth = Vue.extend({
       return Math.floor(8 * totalByte * 1000 / deltaMillis); // bits-per-second
     },
 
+    bandwidthFromChassisMetrics: function(metrics) {
+      if (!metrics) {
+        return 0;
+      }
+      if (!metrics.Last) {
+        return 0;
+      }
+      if (!metrics.Start) {
+        return 0;
+      }
+
+      const totalByte = (metrics.IfInOctets || 0) + (metrics.IfOutOctets || 0);
+      const deltaMillis = metrics.Last - metrics.Start;
+      const elapsedMillis = Date.now() - new Date(metrics.Last);
+
+      if (deltaMillis === 0) {
+        return 0;
+      }
+      if (elapsedMillis > maxClockSkewMillis) {
+        return 0;
+      }
+
+      return Math.floor(8 * totalByte * 1000 / deltaMillis); // bits-per-second
+    },
+
     setup: function(topology) {
       this.topology = topology;
     },
@@ -40,6 +65,10 @@ var LinkLabelBandwidth = Vue.extend({
         metadata = link.target.metadata;
       } else if (link.source.metadata.LastUpdateMetric) {
         metadata = link.source.metadata;
+      } else if (link.target.metadata.LastUpdateChassisIfMetric) {
+        metadata = link.target.metadata;
+      } else if (link.source.metadata.LastUpdateChassisIfMetric) {
+        metadata = link.source.metadata;
       } else {
         return;
       }
@@ -49,12 +78,19 @@ var LinkLabelBandwidth = Vue.extend({
       link.bandwidthBaseline = (this.topology.bandwidth.bandwidthThreshold === 'relative') ?
         metadata.Speed || defaultBandwidthBaseline : 1;
 
-      link.bandwidthAbsolute = this.bandwidthFromMetrics(metadata.LastUpdateMetric);
+      link.bandwidthAbsolute = metadata.LastUpdateMetric      ?
+        this.bandwidthFromMetrics(metadata.LastUpdateMetric)  :
+        this.bandwidthFromChassisMetrics(metadata.LastUpdateChassisIfMetric);
       link.bandwidth = link.bandwidthAbsolute / link.bandwidthBaseline;
+      console.log(link.bandwidth, link.bandwidthAbsolute, link.bandwidthBaseline)
     },
 
     hasData: function(link) {
-      if (!link.target.metadata.LastUpdateMetric && !link.source.metadata.LastUpdateMetric) {
+      if (!link.target.metadata.LastUpdateMetric &&
+          !link.source.metadata.LastUpdateMetric &&
+          !link.source.metadata.LastUpdateChassisIfMetric &&
+          !link.source.metadata.LastUpdateChassisIfMetric
+      ) {
         return false;
       }
 
@@ -999,7 +1035,7 @@ TopologyGraphLayout.prototype = {
   },
 
   onNodeDragEnd: function(d) {
-    if (!d3.event.active) { 
+    if (!d3.event.active) {
       this.simulation.alphaTarget(0);
       this.simulationStop();
     }

@@ -178,9 +178,9 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 			if portDescription := lldpLayerInfo.PortDescription; portDescription != "" {
 				// When using lldpd, the port description is the name of the interface
-				if portDescription == ifName {
-					return
-				}
+				// if portDescription == ifName {
+				// 	return
+				// }
 				portLLDPMetadata.Description = portDescription
 				portMetadata["Name"] = bytesToString([]byte(portDescription))
 			}

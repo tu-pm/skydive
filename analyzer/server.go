@@ -236,6 +236,7 @@ func NewServerFromConfig() (*Server, error) {
 	uiServer.AddGlobalVar("ui", config.Get("ui"))
 	uiServer.AddGlobalVar("flow-metric-keys", (&flow.FlowMetric{}).GetFieldKeys())
 	uiServer.AddGlobalVar("interface-metric-keys", (&topology.InterfaceMetric{}).GetFieldKeys())
+	uiServer.AddGlobalVar("chassis-interface-metric-keys", (&topology.ChassisInterfaceMetric{}).GetFieldKeys())
 	uiServer.AddGlobalVar("sflow-metric-keys", (&sflow.SFMetric{}).GetFieldKeys())
 	uiServer.AddGlobalVar("probes", config.Get("analyzer.topology.probes"))
 
@@ -419,6 +420,8 @@ func init() {
 	graph.NodeMetadataDecoders["Vfs"] = netlink.VFSMetadataDecoder
 	graph.NodeMetadataDecoders["Metric"] = topology.InterfaceMetricMetadataDecoder
 	graph.NodeMetadataDecoders["LastUpdateMetric"] = topology.InterfaceMetricMetadataDecoder
+	graph.NodeMetadataDecoders["ChassisMetric"] = topology.ChassisInterfaceMetricMetadataDecoder
+	graph.NodeMetadataDecoders["ChassisLastUpdateMetric"] = topology.ChassisInterfaceMetricMetadataDecoder
 	graph.NodeMetadataDecoders["SFlow"] = sflow.SFMetadataDecoder
 	graph.NodeMetadataDecoders["Ovs"] = ovsdb.OvsMetadataDecoder
 	graph.NodeMetadataDecoders["LLDP"] = lldp.MetadataDecoder
