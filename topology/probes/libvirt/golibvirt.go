@@ -43,6 +43,10 @@ func (d golibvirtDomain) GetXML() ([]byte, error) {
 	return d.XML(d.Name, 0)
 }
 
+func (d golibvirtDomain) GetUUID() (string, error) {
+	return string(d.UUID[:]), nil
+}
+
 func (d golibvirtDomain) GetState() (DomainState, int, error) {
 	state, err := d.DomainState(d.Name)
 	return state, 0, err

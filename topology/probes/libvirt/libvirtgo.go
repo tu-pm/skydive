@@ -42,6 +42,10 @@ func (d libvirtgoDomain) GetXML() ([]byte, error) {
 	return []byte(xml), err
 }
 
+func (d libvirtgoDomain) GetUUID() (string, error) {
+	return d.Domain.GetUUIDString()
+}
+
 func (d libvirtgoDomain) GetState() (DomainState, int, error) {
 	state, i, err := d.Domain.GetState()
 	return DomainState(state), i, err

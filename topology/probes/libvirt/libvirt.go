@@ -57,6 +57,7 @@ type domain interface {
 	GetName() (string, error)
 	GetState() (DomainState, int, error)
 	GetXML() ([]byte, error)
+	GetUUID() (string, error)
 }
 
 // Address describes the XML coding of the pci address of an interface in libvirt
@@ -127,6 +128,39 @@ type Domain struct {
 	HostDevices []HostDev   `xml:"devices>hostdev"`
 }
 
+type Root struct {
+	Type string `xml:"type,attr"`
+	ID   string `xml:"uuid,attr"`
+}
+
+type Owner struct {
+	ID   string `xml:"uuid,attr"`
+	Name string `xml:",chardata"`
+}
+
+type Flavor struct {
+	Name      string `xml:"name,attr"`
+	Memory    int    `xml:"memory"`
+	Disk      int    `xml:"disk"`
+	Swap      int    `xml:"swap"`
+	Ephemeral int    `xml:"ephemeral"`
+	Vcpus     int    `xml:"vcpus"`
+}
+
+type NovaInstance struct {
+	Namespace    string `xml:"nova,attr"`
+	InstanceName string `xml:"name"`
+	CreationTime string `xml:"creationTime"`
+	Flavor       Flavor `xml:"flavor"`
+	User         Owner  `xml:"owner>user"`
+	Project      Owner  `xml:"owner>project"`
+	Root         Root   `xml:"root"`
+}
+
+type NovaMetadata struct {
+	Instance NovaInstance `xml:"metadata>instance"`
+}
+
 // getDomainInterfaces uses libvirt to get information on the interfaces of a
 // domain.
 func (probe *Probe) getDomainInterfaces(
@@ -180,6 +214,21 @@ func (probe *Probe) getDomainInterfaces(
 		hostdevs = append(hostdevs, &hostdevObj)
 	}
 	return
+}
+
+func (probe *Probe) getNovaMetadata(domain domain) *NovaMetadata {
+	rawXML, err := domain.GetXML()
+	if err != nil {
+		probe.Ctx.Logger.Errorf("Cannot get XMLDesc: %s", err)
+		return &NovaMetadata{}
+	}
+
+	m := NovaMetadata{}
+	if err = xml.Unmarshal(rawXML, &m); err != nil {
+		probe.Ctx.Logger.Errorf("XML parsing error: %s", err)
+		return &NovaMetadata{}
+	}
+	return &m
 }
 
 func (probe *Probe) makeHostDev(name string, source *Source) (node *graph.Node, err error) {
@@ -317,7 +366,7 @@ func (probe *Probe) enrichHostDev(hostdev *HostDev, g *graph.Graph, node *graph.
 
 // getDomain access the graph node representing a libvirt domain
 func (probe *Probe) getDomain(d domain) *graph.Node {
-	domainName, err := d.GetName()
+	uuid, err := d.GetUUID()
 	if err != nil {
 		probe.Ctx.Logger.Error(err)
 		return nil
@@ -325,7 +374,8 @@ func (probe *Probe) getDomain(d domain) *graph.Node {
 
 	probe.Ctx.Graph.RLock()
 	defer probe.Ctx.Graph.RUnlock()
-	return probe.Ctx.Graph.LookupFirstNode(graph.Metadata{"Name": domainName, "Type": "libvirt"})
+	node := probe.Ctx.Graph.LookupFirstNode(graph.Metadata{"UUID": uuid, "Type": "libvirt"})
+	return node
 }
 
 // createOrUpdateDomain creates a new graph node representing a libvirt domain
@@ -333,14 +383,30 @@ func (probe *Probe) getDomain(d domain) *graph.Node {
 func (probe *Probe) createOrUpdateDomain(d domain) *graph.Node {
 	probe.Ctx.Graph.Lock()
 	defer probe.Ctx.Graph.Unlock()
+
 	domainName, err := d.GetName()
 	if err != nil {
 		probe.Ctx.Logger.Error(err)
 		return nil
 	}
+
+	domainUUID, err := d.GetUUID()
+	if err != nil {
+		probe.Ctx.Logger.Error(err)
+		return nil
+	}
+
 	metadata := graph.Metadata{
+		"UUID": domainUUID,
 		"Name": domainName,
 		"Type": "libvirt",
+	}
+
+	instance := probe.getNovaMetadata(d).Instance
+	if len(instance.Namespace) != 0 && len(instance.InstanceName) != 0 {
+		metadata["Name"] = instance.InstanceName
+		instance.InstanceName = domainName
+		metadata["Nova"] = instance
 	}
 
 	domainNode := probe.Ctx.Graph.LookupFirstNode(metadata)
