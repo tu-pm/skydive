@@ -43,6 +43,7 @@ flow/probes/metadata_gendecoder.go
 packetinjector/metadata_gendecoder.go
 sflow/metadata_gendecoder.go
 topology/metrics_gendecoder.go
+topology/chassis_metrics_gendecoder.go
 topology/neighbors_gendecoder.go
 topology/nexthop_gendecoder.go
 topology/probes/docker/metadata_gendecoder.go

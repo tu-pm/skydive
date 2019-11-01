@@ -1,4 +1,4 @@
-// +build linux,opencontrail
+// +build linux
 
 /*
  * Copyright (C) 2016 Orange, Inc.
@@ -139,33 +139,34 @@ func getVrfIdFromIntrospect(host string, port int, vrfName string) (vrfId int, e
 }
 
 func (p *Probe) onVhostAdded(node *graph.Node, itf collection.Element) {
-	phyItf, _ := itf.GetField("physical_interface")
-	if phyItf == "" {
-		p.Ctx.Logger.Errorf("Physical interface not found")
-		return
-	}
+	// fmt.Println(itf)
+	// phyItf, _ := itf.GetField("physical_interface")
+	// if phyItf == "" {
+	// 	p.Ctx.Logger.Errorf("Physical interface not found")
+	// 	return
+	// }
 
 	p.vHost = node
 
-	m := graph.Metadata{"Name": phyItf}
-	nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
-	switch {
-	case len(nodes) == 0:
-		p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
-		return
-	case len(nodes) > 1:
-		p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
-		return
-	}
-
-	p.linkToVhost(nodes[0])
+	// m := graph.Metadata{"Name": phyItf}
+	// nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
+	// switch {
+	// case len(nodes) == 0:
+	// 	p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
+	// 	return
+	// case len(nodes) > 1:
+	// 	p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
+	// 	return
+	// }
+	//
+	// p.linkToVhost(nodes[0])
 
 	for _, n := range p.pendingLinks {
 		p.linkToVhost(n)
 	}
 	p.pendingLinks = p.pendingLinks[:0]
 
-	p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
+	// p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
 }
 
 func (p *Probe) linkToVhost(node *graph.Node) {
