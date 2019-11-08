@@ -271,6 +271,16 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 		chassisNodeID := graph.GenID(chassisDiscriminators...)
 		chassis := p.getOrCreate(chassisNodeID, chassisMetadata)
 
+		// Delete nodes with the same mgmt address
+		// Reason: MgmtAddress must be unique between switches
+		mgmtAddress, _ := chassisMetadata.GetFieldString("LLDP.MgmtAddress")
+		dupNodes := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": mgmtAddress})
+		for _, node := range dupNodes {
+			if node != chassis {
+				p.Ctx.Graph.DelNode(node)
+			}
+		}
+
 		// Create a port with a predicatable ID
 		port := p.getOrCreate(graph.GenID(
 			string(chassisNodeID),
@@ -279,7 +289,7 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		if !topology.HaveOwnershipLink(p.Ctx.Graph, chassis, port) {
 			topology.AddOwnershipLink(p.Ctx.Graph, chassis, port, nil)
-			topology.AddLayer2Link(p.Ctx.Graph, chassis, port, nil)
+			// topology.AddLayer2Link(p.Ctx.Graph, chassis, port, nil)
 		}
 
 		if !topology.HaveLayer2Link(p.Ctx.Graph, port, n) {

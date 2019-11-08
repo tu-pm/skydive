@@ -22,6 +22,7 @@ import (
 	"github.com/skydive-project/skydive/graffiti/graph"
 	"github.com/skydive-project/skydive/logging"
 	"github.com/skydive-project/skydive/probe"
+	"github.com/skydive-project/skydive/topology/probes/contrailservicechain"
 	"github.com/skydive-project/skydive/topology/probes/fabric"
 	"github.com/skydive-project/skydive/topology/probes/istio"
 	"github.com/skydive-project/skydive/topology/probes/k8s"
@@ -61,6 +62,8 @@ func NewTopologyProbeBundleFromConfig(g *graph.Graph) (*probe.Bundle, error) {
 			handler, err = istio.NewIstioProbe(g)
 		case "nsm":
 			handler, err = nsm.NewNsmProbe(g)
+		case "servicechain":
+			handler, err = contrailservicechain.NewProbe(g)
 		default:
 			logging.GetLogger().Errorf("unknown probe type: %s", t)
 			continue

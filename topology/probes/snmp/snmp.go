@@ -2,6 +2,10 @@ package snmp
 
 import (
 	"fmt"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/skydive-project/skydive/common"
 	"github.com/skydive-project/skydive/graffiti/graph"
 	"github.com/skydive-project/skydive/probe"
@@ -9,9 +13,6 @@ import (
 	tp "github.com/skydive-project/skydive/topology/probes"
 	"github.com/skydive-project/skydive/topology/probes/lldp"
 	"github.com/soniah/gosnmp"
-	"strings"
-	"sync"
-	"time"
 )
 
 type Probe struct {
@@ -34,10 +35,10 @@ type lldpResponse struct {
 }
 
 type ifResponse struct {
-	address  string
-	statuses map[string]*SnmpPayload
-	metrics  map[string]*SnmpPayload
-	err      error
+	address string
+	status  map[string]*SnmpPayload
+	metrics map[string]*SnmpPayload
+	err     error
 }
 
 func lldpRequest(target, community string) *lldpResponse {
@@ -136,7 +137,7 @@ func ifRequest(target, community string) *ifResponse {
 		res.err = err
 		return res
 	}
-	res.statuses = resStatuses
+	res.status = resStatuses
 	res.metrics = resMetrics
 	return res
 }
@@ -288,7 +289,7 @@ func (p *Probe) refreshLldpTopo(responses map[string]*lldpResponse) {
 			// Update topology
 			if !topology.HaveOwnershipLink(g, locChassis, locPort) {
 				topology.AddOwnershipLink(g, locChassis, locPort, nil)
-				topology.AddLayer2Link(g, locChassis, locPort, nil)
+				// topology.AddLayer2Link(g, locChassis, locPort, nil)
 			}
 			if !topology.HaveLayer2Link(g, locPort, remPort) {
 				topology.AddLayer2Link(g, locPort, remPort, nil)
@@ -331,8 +332,7 @@ func (p *Probe) updateIfMetrics(portNode *graph.Node, portMetrics *SnmpPayload, 
 }
 
 func (p *Probe) updateIfInfo(now, last time.Time) {
-	g := p.Ctx.Graph
-	chassisNodes := g.GetNodes(graph.Metadata{"Type": "switch"})
+	chassisNodes := p.Ctx.Graph.GetNodes(graph.Metadata{"Type": "switch"})
 	ch := make(chan *ifResponse)
 
 	// Iterate through discovered chassis nodes
@@ -355,31 +355,58 @@ func (p *Probe) updateIfInfo(now, last time.Time) {
 		}
 		// Get the chassis node using res.address
 		var chassisNode *graph.Node
-		nodes := g.GetNodes(graph.Metadata{"LLDP.MgmtAddress": res.address})
+		nodes := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": res.address})
 		if len(nodes) > 0 {
 			chassisNode = nodes[0]
 		}
 
-		// Create a mapping between lldp port description to port node
-		for portDescr, portMetadata := range res.statuses {
+		// Create a mapping between lldp port description and port node
+		for portDescr, portMetadata := range res.status {
 			var portID graph.Identifier
-			var portNode *graph.Node
-			if portNode = g.LookupFirstChild(chassisNode, graph.Metadata{
-				"Type":  "switchport",
-				"Probe": "lldp",
-				"Name":  portDescr,
-			}); portNode == nil {
+			// WARNING: There might be more than one node, must list all portNode with the same name and delete the unwanted ones
+			matcher := graph.Metadata{
+				"Type": "switchport",
+				"Name": portDescr,
+			}
+			dupPorts := p.Ctx.Graph.LookupChildren(chassisNode, matcher, nil)
+			switch len(dupPorts) {
+			// No port with given name existed, create new one
+			case 0:
+				if portDescr == "ens11" || portDescr == "ens10" {
+					debug(0, portDescr, matcher)
+				}
 				portID = genLocalPortID(chassisNode, portDescr)
 				portMetadata.SetValue("Name", portDescr)
 				portMetadata.SetValue("Probe", "snmp")
 				portMetadata.SetValue("Type", "switchport")
-			} else {
-				portID = portNode.ID
+				break
+
+			// There's already a port with the given name, just retrieve that port
+			case 1:
+				if portDescr == "ens11" || portDescr == "ens10" {
+					debug(1, portDescr, matcher)
+				}
+				portID = dupPorts[0].ID
+				break
+
+			// There are two ports, the first one was created by the snmp probe and the second one by the lldp probe
+			// => Delete the snmp port and return the lldp port
+			case 2:
+				if portDescr == "ens11" || portDescr == "ens10" {
+					debug(2, portDescr, matcher)
+				}
+				p.Ctx.Graph.DelNode(dupPorts[0])
+				portID = dupPorts[1].ID
+
+			// There shouldn't be more than two ports with the same name existed
+			default:
+				p.Ctx.Logger.Errorf("There's multiple port existed with name %s on switch %s", portDescr, chassisNode)
+				continue
 			}
-			portNode = p.getOrCreate(portID, graph.Metadata(*portMetadata))
-			if !topology.HaveOwnershipLink(g, chassisNode, portNode) {
-				topology.AddOwnershipLink(g, chassisNode, portNode, nil)
-				topology.AddLayer2Link(g, chassisNode, portNode, nil)
+			portNode := p.getOrCreate(portID, graph.Metadata(*portMetadata))
+			if !topology.HaveOwnershipLink(p.Ctx.Graph, chassisNode, portNode) {
+				topology.AddOwnershipLink(p.Ctx.Graph, chassisNode, portNode, nil)
+				// topology.AddLayer2Link(g, chassisNode, portNode, nil)
 			}
 			p.updateIfMetrics(portNode, res.metrics[portDescr], now, last)
 		}
