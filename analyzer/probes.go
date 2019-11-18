@@ -29,6 +29,7 @@ import (
 	"github.com/skydive-project/skydive/topology/probes/nsm"
 	"github.com/skydive-project/skydive/topology/probes/ovn"
 	"github.com/skydive-project/skydive/topology/probes/peering"
+	"github.com/skydive-project/skydive/topology/probes/snmp"
 )
 
 // NewTopologyProbeBundleFromConfig creates a new topology server probes from configuration
@@ -64,6 +65,12 @@ func NewTopologyProbeBundleFromConfig(g *graph.Graph) (*probe.Bundle, error) {
 			handler, err = nsm.NewNsmProbe(g)
 		case "servicechain":
 			handler, err = contrailservicechain.NewProbe(g)
+		case "snmp":
+			community := config.GetString("analyzer.topology.snmp.community")
+			target := config.GetString("analyzer.topology.snmp.target")
+			refreshing := config.GetInt("analyzer.topology.snmp.refreshing")
+			sampling := config.GetInt("analyzer.topology.snmp.sampling")
+			handler, err = snmp.NewProbe(g, community, target, refreshing, sampling)
 		default:
 			logging.GetLogger().Errorf("unknown probe type: %s", t)
 			continue

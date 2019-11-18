@@ -74,9 +74,10 @@ func projectMetadata(p types.Project) graph.Metadata {
 func serviceInstanceMetadata(si types.ServiceInstance, st types.ServiceTemplate) graph.Metadata {
 	m := commonMetadata(si.CommonAttribute)
 	m.SetFieldAndNormalize("Properties", si.ServiceInstanceProperty)
+	m.SetFieldAndNormalize("AttachedNetwork", si.ServiceInstanceProperty)
 	m.SetField("Type", "TF-ServiceInstance")
 	m.SetField("Manager", "TungstenFabric")
-	m.SetFieldAndNormalize("Template", st)
+	m.SetFieldAndNormalize("Template", st.ServiceTemplateProperty)
 	return m
 }
 

@@ -2,7 +2,6 @@ package contrailservicechain
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 
@@ -118,17 +117,17 @@ func (p *Probe) OnServiceInstanceCreate(si types.ServiceInstance, st types.Servi
 	p.eventChan <- func() {
 		p.registerNode(p.siIndexer, si.UUID, serviceInstanceMetadata(si, st))
 	}
-	go func() {
-		ptIDs := si.ListPortTupleIDs()
-		for _, ptID := range ptIDs {
-			pt, err := p.client.GetPortTuple(ptID)
-			if err != nil {
-				logging.GetLogger().Error(err)
-				return
-			}
-			p.OnPortTupleCreate(pt)
+	// go func() {
+	ptIDs := si.ListPortTupleIDs()
+	for _, ptID := range ptIDs {
+		pt, err := p.client.GetPortTuple(ptID)
+		if err != nil {
+			logging.GetLogger().Error(err)
+			return
 		}
-	}()
+		p.OnPortTupleCreate(pt)
+	}
+	// }()
 }
 
 func (p *Probe) OnServiceInstanceDelete(si types.ServiceInstance) {
@@ -139,17 +138,17 @@ func (p *Probe) OnPortTupleCreate(pt types.PortTuple) {
 	p.eventChan <- func() {
 		p.registerNode(p.ptIndexer, pt.UUID, portTupleMetadata(pt))
 	}
-	go func() {
-		vmiIDs := pt.ListVirtualMachineInterfaceIDs()
-		for _, vmiID := range vmiIDs {
-			vmi, err := p.client.GetVirtualMachineInterface(vmiID)
-			if err != nil {
-				logging.GetLogger().Error(err)
-				return
-			}
-			p.OnVirtualMachineInterfaceCreate(vmi)
+	// go func() {
+	vmiIDs := pt.ListVirtualMachineInterfaceIDs()
+	for _, vmiID := range vmiIDs {
+		vmi, err := p.client.GetVirtualMachineInterface(vmiID)
+		if err != nil {
+			logging.GetLogger().Error(err)
+			return
 		}
-	}()
+		p.OnVirtualMachineInterfaceCreate(vmi)
+	}
+	// }()
 }
 
 func (p *Probe) OnPortTupleDelete(pt types.PortTuple) {
@@ -226,6 +225,7 @@ func (p *Probe) createSFCLinks() error {
 func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 	logging.GetLogger().Debugf("Refreshing SFC Topology")
 	p.bundle.Start()
+	p.eventChan = make(chan sfcEvent)
 
 	// Create domain nodes
 	domains, err := p.client.ListDomains()
@@ -267,6 +267,7 @@ func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	p.createSFCLinks()
+	close(p.eventChan)
 
 	wg.Add(1)
 	go func() {
@@ -290,7 +291,6 @@ func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 			}
 		}
 	}()
-	fmt.Println("Retrying...")
 	return nil
 }
 
@@ -298,7 +298,6 @@ func NewProbe(g *graph.Graph) (probe.Handler, error) {
 	p := &Probe{
 		graph:      g,
 		client:     RestApiClient{&http.Client{}, "http://10.60.17.231:8082"},
-		eventChan:  make(chan sfcEvent, 50),
 		dmIndexer:  graph.NewIndexer(g, nil, uuidHasher, false),
 		ptIndexer:  graph.NewIndexer(g, nil, uuidHasher, false),
 		vmiIndexer: graph.NewIndexer(g, nil, uuidHasher, false),

@@ -1,6 +1,7 @@
 package snmp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -8,27 +9,23 @@ import (
 
 	"github.com/skydive-project/skydive/common"
 	"github.com/skydive-project/skydive/graffiti/graph"
+	"github.com/skydive-project/skydive/logging"
 	"github.com/skydive-project/skydive/probe"
 	"github.com/skydive-project/skydive/topology"
-	tp "github.com/skydive-project/skydive/topology/probes"
+	"github.com/skydive-project/skydive/topology/probes"
 	"github.com/skydive-project/skydive/topology/probes/lldp"
 	"github.com/soniah/gosnmp"
 )
 
 type Probe struct {
-	sync.RWMutex
-	graph.DefaultGraphListener
-	Ctx        tp.Context
-	state      common.ServiceState // state of the probe (running or stopped)
-	wg         sync.WaitGroup      // capture goroutines wait group
-	quit       chan bool
+	graph      *graph.Graph
 	community  string
 	target     string
-	refreshing int
-	sampling   int
+	lastUpdate time.Time
 }
 
 type lldpResponse struct {
+	address  string
 	chassis  *SnmpPayload
 	remPorts map[string]*SnmpPayload
 	err      error
@@ -42,7 +39,7 @@ type ifResponse struct {
 }
 
 func lldpRequest(target, community string) *lldpResponse {
-	res := &lldpResponse{}
+	res := &lldpResponse{address: target}
 
 	// Connect to target
 	snmpClient := NewSnmpClient(target, community)
@@ -142,7 +139,7 @@ func ifRequest(target, community string) *ifResponse {
 	return res
 }
 
-func (p *Probe) gatherLldpInfo() (map[string]*lldpResponse, error) {
+func (p *Probe) gatherLldpInfo() map[string]*lldpResponse {
 	responses := make(map[string]*lldpResponse)
 	discovered := make(Set)
 	ch := make(chan *lldpResponse)
@@ -152,22 +149,22 @@ func (p *Probe) gatherLldpInfo() (map[string]*lldpResponse, error) {
 		// Use multiple snmp clients, one for each address, to request
 		// lldp information
 		for _, addr := range addrs {
-			go func(target, community string, ch chan *lldpResponse) {
-				res := lldpRequest(target, community)
+			go func(target string) {
+				res := lldpRequest(target, p.community)
 				ch <- res
-			}(addr, p.community, ch)
+			}(addr)
 		}
 		// Main goroutine wait and get data from all clients
 		neighbors := []string{}
 		for i := 0; i < len(addrs); i++ {
 			// Pull the next message from channel ch
 			res := <-ch
-			if res.err != nil {
-				return make(map[string]*lldpResponse), res.err
-			}
 			// Add the response to responses map
-			addr := (*res.chassis)["MgmtAddress"]
-			responses[addr.(string)] = res
+			responses[res.address] = res
+			if res.err != nil {
+				logging.GetLogger().Error(res.err)
+				continue
+			}
 			// Store neighbors of neighbor
 			for neighbor := range res.remPorts {
 				neighbors = append(neighbors, neighbor)
@@ -177,129 +174,161 @@ func (p *Probe) gatherLldpInfo() (map[string]*lldpResponse, error) {
 		addrs = discovered.Push(neighbors)
 	}
 
-	// Enforce symetricity of the responses map. That means all remote chassis
-	// must also have a link to the current one
-	for addr, res := range responses {
-		for remAddr, _ := range res.remPorts {
-			if _, ok := responses[remAddr].remPorts[addr]; !ok {
-				delete(res.remPorts, remAddr)
-			}
-		}
-	}
-	return responses, nil
+	return responses
 }
 
-func (p *Probe) deleteMissingNodes(responses map[string]*lldpResponse) error {
-	// Delete missing nodes and nodes with edited ID fields
-	g := p.Ctx.Graph
-	for _, chassisNode := range g.GetNodes(graph.Metadata{"Type": "switch"}) {
-		addr, err := chassisNode.GetFieldString("LLDP.MgmtAddress")
-		if err != nil {
-			return err
+func (p *Probe) queryIfInfo(addrs []string) (responses []*ifResponse) {
+	ch := make(chan *ifResponse)
+	for _, addr := range addrs {
+		// Use one goroutine to send snmp request to each chassis address
+		go func(target string) {
+			res := ifRequest(target, p.community)
+			ch <- res
+		}(addr)
+	}
+
+	// Main goroutine wait and get data from all clients
+	for i := 0; i < len(addrs); i++ {
+		// Pull the next message from channel ch
+		res := <-ch
+		// Get the chassis node using res.address
+		responses = append(responses, res)
+	}
+	return
+}
+
+// Update changes in the topology layout gathered from lldp requests
+// Covered cases are:
+// 1. Unable to request LLDP information from a switch -> Set its SNMP state to DOWN
+// 2. Switch's SysName changes, causing its ID to change -> Delete it to create a new one
+// 3. Link from remote port to local port is missing -> Delete the link between them
+func (p *Probe) updateLldpElems(responses map[string]*lldpResponse) {
+	g := p.graph
+	for _, locChassisNode := range g.GetNodes(graph.Metadata{"Type": "switch"}) {
+		addr, _ := locChassisNode.GetFieldString("LLDP.MgmtAddress")
+		locChassis, ok := responses[addr]
+		// 1. If local chassis doesn't appear, set its state to DOWN
+		if !ok || locChassis.err != nil {
+			p.graph.AddMetadata(locChassisNode, "SNMPState", "DOWN")
+			continue
 		}
-		locPorts := g.LookupChildren(chassisNode, nil, graph.Metadata{"RelationType": "ownership"})
-		res, ok := responses[addr]
-		if !ok || chassisNode.ID != genChassisID(res.chassis) {
-			// if a chassis node is missing, or its ID fields get updated, delete it and all of its interfaces
+		locPorts := g.LookupChildren(locChassisNode, graph.Metadata{"Type": "switchport"}, nil)
+		// 2. If local chassis ID has changed, remove it to create a new one
+		if locChassisNode.ID != genChassisID(locChassis.chassis) {
+			fmt.Printf("ID CHANGED: Chassis node %v\n", locChassisNode)
 			for _, port := range locPorts {
 				err := g.DelNode(port)
 				if err != nil {
-					return err
+					logging.GetLogger().Error(err)
 				}
 			}
-			err := g.DelNode(chassisNode)
+			err := g.DelNode(locChassisNode)
 			if err != nil {
-				return err
+				logging.GetLogger().Error(err)
 			}
-		} else {
-			for _, locPortNode := range locPorts {
-				remPortNode := g.LookupFirstChild(locPortNode, graph.Metadata{"Type": "switchport"})
-				if remPortNode == nil {
-					continue
-				}
-				remChassisNode := g.LookupFirstChild(remPortNode, graph.Metadata{"Type": "switch"})
-				if remChassisNode == nil {
-					continue
-				}
-				remAddr, err := remChassisNode.GetFieldString("LLDP.MgmtAddress")
+			continue
+		}
+		for _, locPortNode := range locPorts {
+			// Get current remote port and remote chassis node
+			remPortNode := g.LookupFirstChild(locPortNode, graph.Metadata{"Type": "switchport"})
+			if remPortNode == nil {
+				continue
+			}
+			remChassisNode := g.LookupFirstChild(remPortNode, graph.Metadata{"Type": "switch"})
+			if remChassisNode == nil {
+				continue
+			}
+			// If remote chassis does not appear, just continue
+			remAddr, _ := remChassisNode.GetFieldString("LLDP.MgmtAddress")
+			remChassis, ok := responses[remAddr]
+			if !ok {
+				continue
+			}
+			// 3. If remote port does not have a link to local port, delete the existed link
+			locPortInfo, ok := remChassis.remPorts[remAddr]
+			if !ok || locPortNode.ID != genLldpPortID(locChassis.chassis, locPortInfo) {
+				edge := g.GetFirstLink(locPortNode, remPortNode, topology.Layer2Metadata())
+				lp, _ := locPortNode.GetFieldString("Name")
+				rp, _ := remPortNode.GetFieldString("Name")
+				lc, _ := locChassisNode.GetFieldString("Name")
+				rc, _ := remChassisNode.GetFieldString("Name")
+				fmt.Printf("LINK MISSING: Port %s on switch %s to port %s on switch %s\n", rp, rc, lp, lc)
+				err := g.DelEdge(edge)
 				if err != nil {
-					return err
-				}
-				// check if remote port appears in new chassises
-				remPortInfo, ok := responses[addr].remPorts[remAddr]
-				if !ok || remPortNode.ID != genLldpPortID(responses[remAddr].chassis, remPortInfo) {
-					// Delete missing remote port
-					err := g.DelNode(remPortNode)
-					if err != nil {
-						return err
-					}
+					logging.GetLogger().Error(err)
 				}
 			}
 		}
 	}
-	return nil
 }
 
-func (p *Probe) refreshLldpTopo(responses map[string]*lldpResponse) {
-	g := p.Ctx.Graph
+// Add new nodes and links from lldp responses
+func (p *Probe) addLldpElems(responses map[string]*lldpResponse) {
+	nodeLinks := make(map[string]map[string]*graph.Node)
+	chassisNodes := make(map[string]*graph.Node)
 	for addr, res := range responses {
+		if res.err != nil {
+			continue
+		}
+		// Create or update chassis node
 		chassisLldpMetadata := &lldp.Metadata{}
 		res.chassis.InitStruct(chassisLldpMetadata)
 		chassisMetadata := graph.Metadata{
-			"LLDP":  chassisLldpMetadata,
-			"Name":  chassisLldpMetadata.SysName,
-			"Probe": "lldp",
-			"Type":  "switch",
+			"LLDP":      chassisLldpMetadata,
+			"Name":      chassisLldpMetadata.SysName,
+			"Probe":     "lldp",
+			"Type":      "switch",
+			"SNMPState": "UP",
 		}
-		// Get current chassis node
-		locChassis := p.getOrCreate(
-			genChassisID(res.chassis),
-			chassisMetadata,
-		)
-		for remAddr, remPortInfo := range res.remPorts {
-			// Create localPort node
-			locPortLldpMetadata := &lldp.Metadata{}
-			locPortInfo := responses[remAddr].remPorts[addr]
-			locPortInfo.InitStruct(locPortLldpMetadata)
-			locPortMetadata := graph.Metadata{
-				"LLDP":  locPortLldpMetadata,
-				"Name":  locPortLldpMetadata.Description,
+		locChassisNode := p.getOrCreate(genChassisID(res.chassis), chassisMetadata)
+		chassisNodes[addr] = locChassisNode
+		// Create or update remote ports
+		for remAddr, portInfo := range res.remPorts {
+			remChassis, ok := responses[remAddr]
+			if !ok || remChassis.err != nil {
+				continue
+			}
+			portLldpMetadata := &lldp.Metadata{}
+			portInfo.InitStruct(portLldpMetadata)
+			portMetadata := graph.Metadata{
+				"LLDP":  portLldpMetadata,
+				"Name":  portLldpMetadata.Description,
 				"Probe": "lldp",
 				"Type":  "switchport",
 			}
-			locPort := p.getOrCreate(
-				genLldpPortID(res.chassis, locPortInfo),
-				locPortMetadata,
+			remPortNode := p.getOrCreate(
+				genLldpPortID(remChassis.chassis, portInfo),
+				portMetadata,
 			)
-
-			// Create remotePort node
-			remPortLldpMetadata := &lldp.Metadata{}
-			remPortInfo.InitStruct(remPortLldpMetadata)
-			remPortMetadata := graph.Metadata{
-				"LLDP":  remPortLldpMetadata,
-				"Name":  remPortLldpMetadata.Description,
-				"Probe": "lldp",
-				"Type":  "switchport",
+			if nodeLinks[remAddr] == nil {
+				nodeLinks[remAddr] = make(map[string]*graph.Node)
 			}
-			remPort := p.getOrCreate(
-				genLldpPortID(responses[remAddr].chassis, remPortInfo),
-				remPortMetadata,
-			)
-
-			// Update topology
-			if !topology.HaveOwnershipLink(g, locChassis, locPort) {
-				topology.AddOwnershipLink(g, locChassis, locPort, nil)
-				// topology.AddLayer2Link(g, locChassis, locPort, nil)
+			nodeLinks[remAddr][addr] = remPortNode
+		}
+	}
+	for addr, links := range nodeLinks {
+		chassis := chassisNodes[addr]
+		for remAddr, port := range links {
+			if !topology.HaveOwnershipLink(p.graph, chassis, port) {
+				topology.AddOwnershipLink(p.graph, chassis, port, nil)
 			}
-			if !topology.HaveLayer2Link(g, locPort, remPort) {
-				topology.AddLayer2Link(g, locPort, remPort, nil)
+			remChassisLinks, ok := nodeLinks[remAddr]
+			if !ok {
+				continue
+			}
+			remPort, ok := remChassisLinks[addr]
+			if !ok {
+				continue
+			}
+			if !topology.HaveLayer2Link(p.graph, remPort, port) {
+				topology.AddLayer2Link(p.graph, remPort, port, nil)
 			}
 		}
 	}
 }
 
 func (p *Probe) updateIfMetrics(portNode *graph.Node, portMetrics *SnmpPayload, now, last time.Time) {
-	g := p.Ctx.Graph
+	g := p.graph
 	// Update port metrics and status
 	tr := g.StartMetadataTransaction(portNode)
 	newMetric := &topology.ChassisInterfaceMetric{}
@@ -331,99 +360,79 @@ func (p *Probe) updateIfMetrics(portNode *graph.Node, portMetrics *SnmpPayload, 
 	tr.Commit()
 }
 
-func (p *Probe) updateIfInfo(now, last time.Time) {
-	chassisNodes := p.Ctx.Graph.GetNodes(graph.Metadata{"Type": "switch"})
-	ch := make(chan *ifResponse)
-
-	// Iterate through discovered chassis nodes
-	for _, chassisNode := range chassisNodes {
-		addr, _ := chassisNode.GetFieldString("LLDP.MgmtAddress")
-		// Use one goroutine to send snmp request to each chassis address
-		go func(target, community string, ch chan *ifResponse) {
-			res := ifRequest(target, community)
-			ch <- res
-		}(addr, p.community, ch)
-	}
-
+func (p *Probe) updateIfInfo(ifResponses []*ifResponse, now, last time.Time) {
 	// Main goroutine wait and get data from all clients
-	for i := 0; i < len(chassisNodes); i++ {
-		// Pull the next message from channel ch
-		res := <-ch
-		if res.err != nil {
-			p.Ctx.Logger.Error(res.err)
-			continue
-		}
-		// Get the chassis node using res.address
+	for _, res := range ifResponses {
 		var chassisNode *graph.Node
-		nodes := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": res.address})
+		nodes := p.graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": res.address})
 		if len(nodes) > 0 {
 			chassisNode = nodes[0]
 		}
-
-		// Create a mapping between lldp port description and port node
+		// Set SNMPState to DOWN if unable to request SNMP information
+		if res.err != nil {
+			p.graph.AddMetadata(chassisNode, "SNMPState", "DOWN")
+			logging.GetLogger().Error(res.err)
+			continue
+		}
+		// Keep track on ports that will be updated
+		updatedPorts := make(map[graph.Identifier]bool)
+		for _, portNode := range p.graph.LookupChildren(chassisNode, graph.Metadata{"Type": "switchport"}, nil) {
+			updatedPorts[portNode.ID] = false
+		}
+		// Update metadata and metrics for each port
 		for portDescr, portMetadata := range res.status {
 			var portID graph.Identifier
-			// WARNING: There might be more than one node, must list all portNode with the same name and delete the unwanted ones
 			matcher := graph.Metadata{
 				"Type": "switchport",
 				"Name": portDescr,
 			}
-			dupPorts := p.Ctx.Graph.LookupChildren(chassisNode, matcher, nil)
-			switch len(dupPorts) {
-			// No port with given name existed, create new one
-			case 0:
-				if portDescr == "ens11" || portDescr == "ens10" {
-					debug(0, portDescr, matcher)
-				}
+			dupPorts := p.graph.LookupChildren(chassisNode, matcher, nil)
+			if len(dupPorts) == 0 {
+				// If port didn't exist, create it
 				portID = genLocalPortID(chassisNode, portDescr)
 				portMetadata.SetValue("Name", portDescr)
 				portMetadata.SetValue("Probe", "snmp")
 				portMetadata.SetValue("Type", "switchport")
-				break
-
-			// There's already a port with the given name, just retrieve that port
-			case 1:
-				if portDescr == "ens11" || portDescr == "ens10" {
-					debug(1, portDescr, matcher)
+			} else {
+				// If there are multiple ports exised, take the newest one
+				var t1 time.Time
+				for _, port := range dupPorts {
+					if t2 := time.Time(port.CreatedAt); t2.After(t1) {
+						t1 = t2
+						portID = port.ID
+					}
 				}
-				portID = dupPorts[0].ID
-				break
-
-			// There are two ports, the first one was created by the snmp probe and the second one by the lldp probe
-			// => Delete the snmp port and return the lldp port
-			case 2:
-				if portDescr == "ens11" || portDescr == "ens10" {
-					debug(2, portDescr, matcher)
-				}
-				p.Ctx.Graph.DelNode(dupPorts[0])
-				portID = dupPorts[1].ID
-
-			// There shouldn't be more than two ports with the same name existed
-			default:
-				p.Ctx.Logger.Errorf("There's multiple port existed with name %s on switch %s", portDescr, chassisNode)
-				continue
 			}
 			portNode := p.getOrCreate(portID, graph.Metadata(*portMetadata))
-			if !topology.HaveOwnershipLink(p.Ctx.Graph, chassisNode, portNode) {
-				topology.AddOwnershipLink(p.Ctx.Graph, chassisNode, portNode, nil)
-				// topology.AddLayer2Link(g, chassisNode, portNode, nil)
+			if !topology.HaveOwnershipLink(p.graph, chassisNode, portNode) {
+				topology.AddOwnershipLink(p.graph, chassisNode, portNode, nil)
 			}
 			p.updateIfMetrics(portNode, res.metrics[portDescr], now, last)
+			updatedPorts[portNode.ID] = true
+		}
+		// If there are ports that didn't get updated, indicating that switch can no longer detect them -> Remove them from the graph
+		for id, updated := range updatedPorts {
+			if !updated {
+				lc, _ := chassisNode.GetFieldString("Name")
+				lp, _ := p.graph.GetNode(id).GetFieldString("Name")
+				fmt.Printf("Port %s on switch %s doesn't get updated\n", lp, lc)
+				p.graph.DelNode(p.graph.GetNode(id))
+			}
 		}
 	}
 }
 
 func (p *Probe) getOrCreate(id graph.Identifier, m graph.Metadata) *graph.Node {
-	node := p.Ctx.Graph.GetNode(id)
+	node := p.graph.GetNode(id)
 	if node == nil {
 		var err error
 
-		node, err = p.Ctx.Graph.NewNode(id, m)
+		node, err = p.graph.NewNode(id, m)
 		if err != nil {
-			p.Ctx.Logger.Error(err)
+			logging.GetLogger().Error(err)
 		}
 	} else {
-		tr := p.Ctx.Graph.StartMetadataTransaction(node)
+		tr := p.graph.StartMetadataTransaction(node)
 		for k, v := range m {
 			tr.AddMetadata(k, v)
 		}
@@ -458,68 +467,54 @@ func genLldpPortID(chassis, port *SnmpPayload) graph.Identifier {
 	)
 }
 
-func (p *Probe) Start() {
-	p.state.Store(common.RunningState)
-	p.Ctx.Graph.AddEventListener(p)
-	p.Ctx.Graph.RLock()
-	defer p.Ctx.Graph.RUnlock()
-	p.Lock()
-	defer p.Unlock()
-
+func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
+	wg.Add(1)
 	go func() {
-		refreshTicker := time.NewTicker(time.Duration(p.refreshing) * time.Second)
-		sampleTicker := time.NewTicker(time.Duration(p.sampling) * time.Second)
-		last := time.Now().UTC()
-		for {
-			select {
-			case <-refreshTicker.C:
-				fmt.Println("Refreshing...")
-				responses, err := p.gatherLldpInfo()
-				if err != nil {
-					p.Ctx.Logger.Error(err)
-				}
+		lldpResponses := p.gatherLldpInfo()
 
-				p.Ctx.Graph.Lock()
-				err = p.deleteMissingNodes(responses)
-				if err != nil {
-					p.Ctx.Logger.Error(err)
-				}
-				p.refreshLldpTopo(responses)
-				p.Ctx.Graph.Unlock()
+		// Update graph using lldp metadata
+		fmt.Println("Refreshing...")
+		p.graph.Lock()
+		p.updateLldpElems(lldpResponses)
+		p.addLldpElems(lldpResponses)
+		p.graph.Unlock()
 
-			case t := <-sampleTicker.C:
-				fmt.Println("Updating...")
-				p.Ctx.Graph.Lock()
-				now := t.UTC()
-				p.updateIfInfo(now, last)
-				last = now
-				p.Ctx.Graph.Unlock()
-
-			case <-p.quit:
-				return
+		// Extract discovered switches' MgmtAddress
+		p.graph.RLock()
+		var addrs []string
+		switches := p.graph.GetNodes(graph.Metadata{"Type": "switch"})
+		for _, sw := range switches {
+			addr, err := sw.GetFieldString("LLDP.MgmtAddress")
+			if err == nil {
+				addrs = append(addrs, addr)
 			}
 		}
-	}()
-}
+		p.graph.RUnlock()
 
-func (p *Probe) Stop() {
-	p.quit <- true
-	p.Ctx.Graph.RemoveEventListener(p)
-	p.state.Store(common.StoppingState)
-	p.Ctx.Logger.Debugf("Stopping SNMP probe")
-	p.wg.Wait()
+		// Query switch and ports statistics
+		ifResponses := p.queryIfInfo(addrs)
+		// Update graph using if metadata
+		fmt.Println("Updating...")
+		now := time.Now().UTC()
+		p.graph.Lock()
+		p.updateIfInfo(ifResponses, now, p.lastUpdate)
+		p.graph.Unlock()
+		p.lastUpdate = now
+
+		wg.Done()
+	}()
+	return nil
 }
 
 // Init initializes a new SNMP probe
-func (p *Probe) Init(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
-	p.community = ctx.Config.GetString("agent.topology.snmp.community")
-	p.target = ctx.Config.GetString("agent.topology.snmp.target")
-	p.refreshing = ctx.Config.GetInt("agent.topology.snmp.refreshing")
-	p.sampling = ctx.Config.GetInt("agent.topology.snmp.sampling")
-	p.Ctx = ctx
-	p.state = common.StoppedState
-	p.quit = make(chan bool)
-	return p, nil
+func NewProbe(g *graph.Graph, community, target string, refreshing, sampling int) (probe.Handler, error) {
+	p := &Probe{
+		graph:      g,
+		community:  community,
+		target:     target,
+		lastUpdate: time.Now().UTC(),
+	}
+	return probes.NewProbeWrapper(p), nil
 }
 
 func getIPv4(oid string) string {

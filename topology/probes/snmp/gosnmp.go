@@ -1,11 +1,12 @@
 package snmp
 
 import (
-	"errors"
 	"fmt"
-	"github.com/soniah/gosnmp"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/soniah/gosnmp"
 )
 
 // SnmpClient implements a wrapper around gosnmp.GoSNMP struct
@@ -33,7 +34,11 @@ func NewSnmpClient(target, community string) *SnmpClient {
 
 // Connect is similar to gosnmp.GoSNMP.Connect
 func (c *SnmpClient) Connect() error {
-	return c.gosnmp.Connect()
+	err := c.gosnmp.Connect()
+	if err != nil {
+		return errors.Wrapf(err, "Failed to connect to snmp agent at address %s", c.gosnmp.Target)
+	}
+	return nil
 }
 
 // Close closes current active connection
@@ -43,7 +48,11 @@ func (c *SnmpClient) Close() {
 
 // Walk is similar to gosnmp.GoSNMP.Walk
 func (c *SnmpClient) Walk(rootOid string, walkFn gosnmp.WalkFunc) error {
-	return c.gosnmp.Walk(rootOid, walkFn)
+	err := c.gosnmp.Walk(rootOid, walkFn)
+	if err != nil {
+		return errors.Wrapf(err, "SnmpWalk on root OID %s at address %s error", rootOid, c.gosnmp.Target)
+	}
+	return nil
 }
 
 // Get is similar to gosnmp.GoSNMP.Get, but the oids parameter is a
@@ -57,10 +66,12 @@ func (c *SnmpClient) Get(oids map[string]string) (result *SnmpPayload, err error
 	}
 	pkt, err := c.gosnmp.Get(oidStrings)
 	if err != nil {
+		err = errors.Wrapf(err, "SnmpGet on OIDs %v at address %s error", oidStrings, c.gosnmp.Target)
 		return
 	}
 	values, err := c.getPDUValues(pkt.Variables)
 	if err != nil {
+		err = errors.Wrapf(err, "SnmpGet unpack pdu values error")
 		return
 	}
 	for i, label := range oidLabels {
@@ -82,10 +93,12 @@ func (c *SnmpClient) GetNext(oids map[string]string) (nextOIDs map[string]string
 	}
 	pkt, err := c.gosnmp.GetNext(oidStrings)
 	if err != nil {
+		err = errors.Wrapf(err, "SnmpGetNext on OIDs %v at address %s error", oidStrings, c.gosnmp.Target)
 		return
 	}
 	values, err := c.getPDUValues(pkt.Variables)
 	if err != nil {
+		err = errors.Wrapf(err, "SnmpGetNext unpack pdu values error")
 		return
 	}
 	for i, label := range oidLabels {
