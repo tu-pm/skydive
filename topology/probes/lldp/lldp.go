@@ -176,13 +176,15 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 		if lldpLayerInfo := packet.Layer(layers.LayerTypeLinkLayerDiscoveryInfo); lldpLayerInfo != nil {
 			lldpLayerInfo := lldpLayerInfo.(*layers.LinkLayerDiscoveryInfo)
 
-			if portDescription := lldpLayerInfo.PortDescription; portDescription != "" {
-				// When using lldpd, the port description is the name of the interface
-				// if portDescription == ifName {
-				// 	return
-				// }
-				portLLDPMetadata.Description = portDescription
+			if portIDSubtype := lldpLayer.PortID.Subtype; portIDSubtype == layers.LLDPPortIDSubtypeIfaceName {
+				portMetadata["Name"] = bytesToString(lldpLayer.PortID.ID)
+			} else {
+				portDescription := lldpLayerInfo.PortDescription
 				portMetadata["Name"] = bytesToString([]byte(portDescription))
+			}
+
+			if portDescription := lldpLayerInfo.PortDescription; portDescription != "" {
+				portLLDPMetadata.Description = portDescription
 			}
 
 			if lldpLayerInfo.SysDescription != "" {
