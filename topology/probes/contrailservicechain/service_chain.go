@@ -225,7 +225,7 @@ func (p *Probe) createSFCLinks() error {
 func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 	logging.GetLogger().Debugf("Refreshing SFC Topology")
 	p.bundle.Start()
-	p.eventChan = make(chan sfcEvent)
+	p.eventChan = make(chan sfcEvent, 100)
 
 	// Create domain nodes
 	domains, err := p.client.ListDomains()

@@ -290,9 +290,15 @@ func (p *Probe) addLldpElems(responses map[string]*lldpResponse) {
 			}
 			portLldpMetadata := &lldp.Metadata{}
 			portInfo.InitStruct(portLldpMetadata)
+			var portName string
+			if portLldpMetadata.PortIDType == "Interface Name" {
+				portName = portLldpMetadata.PortID
+			} else {
+				portName = portLldpMetadata.Description
+			}
 			portMetadata := graph.Metadata{
 				"LLDP":  portLldpMetadata,
-				"Name":  portLldpMetadata.Description,
+				"Name":  portName,
 				"Probe": "lldp",
 				"Type":  "switchport",
 			}
@@ -454,7 +460,7 @@ func genChassisID(m *SnmpPayload) graph.Identifier {
 func genLocalPortID(chassis *graph.Node, portDescr string) graph.Identifier {
 	return graph.GenID(
 		string(chassis.ID),
-		"Description",
+		// "Description",
 		portDescr,
 	)
 }
