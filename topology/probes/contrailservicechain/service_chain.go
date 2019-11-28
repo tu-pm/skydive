@@ -48,7 +48,7 @@ type Probe struct {
 }
 
 func (p *Probe) addServiceChainLink(idxr1, idxr2 *graph.Indexer, uuid1, uuid2 string, metadata graph.Metadata) {
-	logging.GetLogger().Debugf("Discover new service chain link from UUID %s to UUID %s", uuid1, uuid2)
+	// logging.GetLogger().Debugf("Discover new service chain link from UUID %s to UUID %s", uuid1, uuid2)
 	p.graph.Lock()
 	node1, _ := idxr1.GetNode(uuid1)
 	node2, _ := idxr2.GetNode(uuid2)
@@ -59,7 +59,7 @@ func (p *Probe) addServiceChainLink(idxr1, idxr2 *graph.Indexer, uuid1, uuid2 st
 }
 
 func (p *Probe) registerNode(indexer *graph.Indexer, uuid string, metadata graph.Metadata) {
-	logging.GetLogger().Debugf("Registering Contrail SFC object with type %s, UUID %s and metadata %+v", metadata["Type"], uuid, metadata)
+	// logging.GetLogger().Debugf("Registering Contrail SFC object with type %s, UUID %s and metadata %+v", metadata["Type"], uuid, metadata)
 
 	p.graph.Lock()
 	defer p.graph.Unlock()
@@ -81,7 +81,7 @@ func (p *Probe) registerNode(indexer *graph.Indexer, uuid string, metadata graph
 }
 
 func (p *Probe) unregisterNode(indexer *graph.Indexer, uuid string) {
-	logging.GetLogger().Debugf("Unregistering OVN object with UUID %s", uuid)
+	logging.GetLogger().Debugf("Unregistering SFC object with UUID %s", uuid)
 
 	p.graph.Lock()
 	defer p.graph.Unlock()
@@ -185,7 +185,6 @@ func (p *Probe) createSFCLinks() error {
 	policies, _ := p.client.ListNetworkPolicys()
 	for _, policy := range policies {
 		ruleTargets, _ := p.client.ExtractRuleTargets(policy)
-		debug("Extracted Rule targets", ruleTargets)
 		for _, rt := range ruleTargets {
 			siIDs := rt.ServiceInstanceIDs
 			if len(siIDs) == 0 {
@@ -280,13 +279,10 @@ func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 			select {
 			case eventCallback, ok := <-p.eventChan:
 				if !ok {
-					debug("DONE GETTING EVENT CALLBACK", eventCallback)
 					return
 				}
-				debug("GOT EVENT CALLBACK:", eventCallback)
 				eventCallback()
 			case <-ctx.Done():
-				debug("DONE WAITING FOR EVENT CALLBACK")
 				return
 			}
 		}
@@ -368,8 +364,4 @@ func uuidHasher(n *graph.Node) map[string]interface{} {
 		return map[string]interface{}{uuid: nil}
 	}
 	return nil
-}
-
-func debug(s ...interface{}) {
-	logging.GetLogger().Debug(s...)
 }

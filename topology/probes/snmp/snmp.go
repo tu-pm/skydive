@@ -528,9 +528,3 @@ func getIPv4(oid string) string {
 	slice = slice[len(slice)-4:]
 	return strings.Join(slice, ".")
 }
-
-func debug(x ...interface{}) {
-	fmt.Printf(">> DEBUG: ")
-	fmt.Println(x...)
-	fmt.Println()
-}

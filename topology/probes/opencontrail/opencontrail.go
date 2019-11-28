@@ -21,11 +21,13 @@ package opencontrail
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/nlewo/contrail-introspect-cli/collection"
 	"github.com/nlewo/contrail-introspect-cli/descriptions"
@@ -39,6 +41,7 @@ import (
 
 // Probe describes a probe that reads OpenContrail database and updates the graph
 type Probe struct {
+	sync.RWMutex
 	graph.DefaultGraphListener
 	Ctx                     tp.Context
 	nodeUpdaterChan         chan graph.Identifier
@@ -47,10 +50,12 @@ type Probe struct {
 	agentHost               string
 	agentPort               int
 	mplsUDPPort             int
+	vrfs                    map[string]struct{}
 	routingTables           map[int]*RoutingTable
 	routingTableUpdaterChan chan RoutingTableUpdate
 	cancelCtx               context.Context
 	cancelFunc              context.CancelFunc
+	quit                    chan bool
 }
 
 func (p *Probe) retrieveMetadata(metadata graph.Metadata, itf collection.Element) (*Metadata, error) {
@@ -139,34 +144,31 @@ func getVrfIdFromIntrospect(host string, port int, vrfName string) (vrfId int, e
 }
 
 func (p *Probe) onVhostAdded(node *graph.Node, itf collection.Element) {
-	// fmt.Println(itf)
-	// phyItf, _ := itf.GetField("physical_interface")
-	// if phyItf == "" {
-	// 	p.Ctx.Logger.Errorf("Physical interface not found")
-	// 	return
-	// }
-
 	p.vHost = node
 
-	// m := graph.Metadata{"Name": phyItf}
-	// nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
-	// switch {
-	// case len(nodes) == 0:
-	// 	p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
-	// 	return
-	// case len(nodes) > 1:
-	// 	p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
-	// 	return
-	// }
-	//
-	// p.linkToVhost(nodes[0])
+	// Link physical interface to vhost if presents
+	phyItf, _ := itf.GetField("physical_interface")
+	if phyItf != "" {
+		m := graph.Metadata{"Name": phyItf}
+		nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
+		switch {
+		case len(nodes) == 0:
+			p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
+			return
+		case len(nodes) > 1:
+			p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
+			return
+		}
 
+		p.linkToVhost(nodes[0])
+		p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
+	}
+
+	// Link pending links to vhost
 	for _, n := range p.pendingLinks {
 		p.linkToVhost(n)
 	}
 	p.pendingLinks = p.pendingLinks[:0]
-
-	// p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
 }
 
 func (p *Probe) linkToVhost(node *graph.Node) {
@@ -227,8 +229,10 @@ func (p *Probe) nodeUpdater() {
 			if err != nil {
 				return
 			}
+			p.vrfs[extIDs.VRF] = struct{}{}
 			p.updateNode(node, extIDs)
 			p.linkToVhost(node)
+
 			p.OnInterfaceAdded(int(extIDs.VRFID), extIDs.UUID)
 		}
 
@@ -300,10 +304,12 @@ func (p *Probe) Start() {
 	p.Ctx.Graph.AddEventListener(p)
 	go p.nodeUpdater()
 	go p.rtMonitor()
+	go p.tunnelUpdater()
 }
 
 // Stop the probe
 func (p *Probe) Stop() {
+	p.quit <- true
 	p.cancelFunc()
 	p.Ctx.Graph.RemoveEventListener(p)
 	close(p.nodeUpdaterChan)
@@ -320,8 +326,10 @@ func (p *Probe) Init(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error
 	p.agentPort = ctx.Config.GetInt("opencontrail.port")
 	p.mplsUDPPort = ctx.Config.GetInt("opencontrail.mpls_udp_port")
 	p.nodeUpdaterChan = make(chan graph.Identifier, 500)
+	p.vrfs = make(map[string]struct{})
 	p.routingTables = make(map[int]*RoutingTable)
 	p.routingTableUpdaterChan = make(chan RoutingTableUpdate, 500)
+	p.quit = make(chan bool)
 
 	return p, nil
 }

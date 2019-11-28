@@ -59,6 +59,17 @@ type RoutingTable struct {
 	Routes         []*Route
 }
 
+// easyjson:json
+// gendecoder
+type NHTunnel struct {
+	VrfName       string `json:",omitempty"`
+	Prefix        string `json:",omitempty"`
+	SourceIP      string `json:",omitempty"`
+	DestinationIP string `json:",omitempty"`
+	TunnelType    string `json:",omitempty"`
+	Valid         bool   `json:",omitempty"`
+}
+
 // MetadataDecoder implements a json message raw decoder
 func MetadataDecoder(raw json.RawMessage) (common.Getter, error) {
 	var m Metadata

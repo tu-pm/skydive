@@ -22,10 +22,11 @@ package libvirt
 import (
 	"context"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/pkg/errors"
 
 	"github.com/skydive-project/skydive/probe"
 	"github.com/skydive-project/skydive/topology"
@@ -147,9 +148,8 @@ type Flavor struct {
 	Vcpus     int    `xml:"vcpus"`
 }
 
-type NovaInstance struct {
-	Namespace    string `xml:"nova,attr"`
-	InstanceName string `xml:"name"`
+type NovaMetadata struct {
+	Name         string `xml:"name"`
 	CreationTime string `xml:"creationTime"`
 	Flavor       Flavor `xml:"flavor"`
 	User         Owner  `xml:"owner>user"`
@@ -157,8 +157,9 @@ type NovaInstance struct {
 	Root         Root   `xml:"root"`
 }
 
-type NovaMetadata struct {
-	Instance NovaInstance `xml:"metadata>instance"`
+type NovaInstance struct {
+	Namespace string `xml:"nova,attr"`
+	NovaMetadata
 }
 
 // getDomainInterfaces uses libvirt to get information on the interfaces of a
@@ -216,19 +217,25 @@ func (probe *Probe) getDomainInterfaces(
 	return
 }
 
-func (probe *Probe) getNovaMetadata(domain domain) *NovaMetadata {
+func (probe *Probe) getNovaMetadata(domain domain) (m *NovaMetadata, err error) {
 	rawXML, err := domain.GetXML()
 	if err != nil {
-		probe.Ctx.Logger.Errorf("Cannot get XMLDesc: %s", err)
-		return &NovaMetadata{}
+		err = errors.Wrap(err, "Cannot get XMLDesc")
+		return
 	}
 
-	m := NovaMetadata{}
-	if err = xml.Unmarshal(rawXML, &m); err != nil {
-		probe.Ctx.Logger.Errorf("XML parsing error: %s", err)
-		return &NovaMetadata{}
+	nm := struct {
+		Instance NovaInstance `xml:"metadata>instance"`
+	}{}
+	if err = xml.Unmarshal(rawXML, &nm); err != nil {
+		err = errors.Wrap(err, "XML parsing error")
+		return
 	}
-	return &m
+
+	if len(nm.Instance.Namespace) > 0 {
+		m = &nm.Instance.NovaMetadata
+	}
+	return
 }
 
 func (probe *Probe) makeHostDev(name string, source *Source) (node *graph.Node, err error) {
@@ -397,19 +404,25 @@ func (probe *Probe) createOrUpdateDomain(d domain) *graph.Node {
 	}
 
 	metadata := graph.Metadata{
-		"UUID": domainUUID,
-		"Name": domainName,
-		"Type": "libvirt",
-	}
-
-	instance := probe.getNovaMetadata(d).Instance
-	if len(instance.Namespace) != 0 && len(instance.InstanceName) != 0 {
-		metadata["Name"] = instance.InstanceName
-		instance.InstanceName = domainName
-		metadata["Nova"] = instance
+		"UUID":         domainUUID,
+		"InstanceName": domainName,
+		"Type":         "libvirt",
 	}
 
 	domainNode := probe.Ctx.Graph.LookupFirstNode(metadata)
+
+	nova, err := probe.getNovaMetadata(d)
+	if err != nil {
+		probe.Ctx.Logger.Error(err)
+	}
+
+	if nova != nil {
+		metadata["Name"] = nova.Name
+		metadata["Nova"] = nova
+	} else {
+		metadata["Name"] = domainName
+	}
+
 	if domainNode == nil {
 		domainNode, err = probe.Ctx.Graph.NewNode(graph.GenID(), metadata)
 		if err != nil {
@@ -428,6 +441,8 @@ func (probe *Probe) createOrUpdateDomain(d domain) *graph.Node {
 		probe.Ctx.Logger.Errorf("Cannot update domain state for %s", domainName)
 	} else {
 		tr := probe.Ctx.Graph.StartMetadataTransaction(domainNode)
+		tr.AddMetadata("Name", metadata["Name"])
+		tr.AddMetadata("Nova", metadata["Nova"])
 		tr.AddMetadata("State", DomainStateMap[state])
 		if err = tr.Commit(); err != nil {
 			probe.Ctx.Logger.Errorf("Metadata transaction failed: %s", err)
