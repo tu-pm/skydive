@@ -63,3 +63,8 @@ vendor/git.fd.io/
 vendor/sigs.k8s.io/
 websocket/structmessage.pb.go
 
+contrib/dev/roles
+contrib/exporters/allinone/allinone
+contrib/vagrant/provisioning
+contrib/vagrant/roles/skydive_dev
+js/package-lock.json

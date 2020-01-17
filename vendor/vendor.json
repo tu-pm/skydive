@@ -1319,6 +1319,12 @@
 			"revisionTime": "2016-01-25T20:49:56Z"
 		},
 		{
+			"checksumSHA1": "prkYozV0z6nsp/8PMhgtsB6BbLc=",
+			"path": "github.com/golang/mock/gomock",
+			"revision": "0b73a1dbc3e1197079e9b9db31ab2879a5c9a095",
+			"revisionTime": "2019-10-24T04:23:07Z"
+		},
+		{
 			"checksumSHA1": "BP2buXHHOKxI5eYS2xELVng2kf4=",
 			"path": "github.com/golang/protobuf/jsonpb",
 			"revision": "b5d812f8a3706043e23a9cd5babf2e5423744d30",
@@ -1513,6 +1519,30 @@
 			"path": "github.com/gophercloud/gophercloud/openstack",
 			"revision": "849a2e71dd64dbfa2bd4be110ace68881802414b",
 			"revisionTime": "2017-09-29T03:20:27Z"
+		},
+		{
+			"checksumSHA1": "1ugiXlfhjIogswGBHFbb1uixrnM=",
+			"path": "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/extendedserverattributes",
+			"revision": "6ad562af8c1fd8a69397a13caf58fa184d115b56",
+			"revisionTime": "2019-10-25T18:50:32Z"
+		},
+		{
+			"checksumSHA1": "/Kpn+hR9Ud3EORus/4lOe3Ro1nI=",
+			"path": "github.com/gophercloud/gophercloud/openstack/compute/v2/flavors",
+			"revision": "6ad562af8c1fd8a69397a13caf58fa184d115b56",
+			"revisionTime": "2019-10-25T18:50:32Z"
+		},
+		{
+			"checksumSHA1": "CSnfH01hSas0bdc/3m/f5Rt6SFY=",
+			"path": "github.com/gophercloud/gophercloud/openstack/compute/v2/images",
+			"revision": "6ad562af8c1fd8a69397a13caf58fa184d115b56",
+			"revisionTime": "2019-10-25T18:50:32Z"
+		},
+		{
+			"checksumSHA1": "5xTpn7LNLDXzljKZKj2MvtwpkIA=",
+			"path": "github.com/gophercloud/gophercloud/openstack/compute/v2/servers",
+			"revision": "6ad562af8c1fd8a69397a13caf58fa184d115b56",
+			"revisionTime": "2019-10-25T18:50:32Z"
 		},
 		{
 			"checksumSHA1": "oOJkelRgWx0NzUmxuI3kTS27gM0=",
@@ -2581,6 +2611,12 @@
 			"comment": "v0.1-11-g5113f8f",
 			"path": "github.com/socketplane/libovsdb",
 			"revision": "5113f8fb4d9d374417ab4ce35424fbea1aad7272"
+		},
+		{
+			"checksumSHA1": "CbwpNgCTUs6OP8YDrUY4SDV0XKQ=",
+			"path": "github.com/soniah/gosnmp",
+			"revision": "b3532de686f6834255deeb98a64768a591f42195",
+			"revisionTime": "2019-10-18T22:57:16Z"
 		},
 		{
 			"checksumSHA1": "/nVR+XV3LuSQEJTy0YZRtbWbCbY=",
