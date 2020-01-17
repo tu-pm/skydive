@@ -41,7 +41,6 @@ var mappings = map[string]map[int]string{
 }
 
 // LLDP-MIB OIDs
-
 var LldpLocalChassisOIDs = map[string]string{
 	"Description":   ".1.0.8802.1.1.2.1.3.4.0",
 	"ChassisID":     ".1.0.8802.1.1.2.1.3.2.0",
@@ -66,10 +65,12 @@ var LldpRemotePortOIDs = map[string]string{
 	"MTU":                    ".1.0.8802.1.1.2.1.5.4623.1.3.4.1.1",
 }
 
-var LldpRemotePortOIDsMinimum = map[string]string{
-	"Description": ".1.0.8802.1.1.2.1.4.1.1.8",
-	"PortID":      ".1.0.8802.1.1.2.1.4.1.1.7",
-	"PortIDType":  ".1.0.8802.1.1.2.1.4.1.1.6",
+var LldpRemotePortIdOID = ".1.0.8802.1.1.2.1.4.1.1.7"
+
+var LldpLocalPortOIDsMinimum = map[string]string{
+	"Description": ".1.0.8802.1.1.2.1.3.7.1.4",
+	"PortID":      ".1.0.8802.1.1.2.1.3.7.1.3",
+	"PortIDType":  ".1.0.8802.1.1.2.1.3.7.1.2",
 }
 
 var LldpRemoteChassisMgmtAddressOID = ".1.0.8802.1.1.2.1.4.2.1.4"
@@ -79,24 +80,24 @@ var LldpRemoteChassisMgmtAddressOID = ".1.0.8802.1.1.2.1.4.2.1.4"
 var IfDescrOID = "1.3.6.1.2.1.2.2.1.2"
 
 var IfMetricOIDs = map[string]string{
-	"IfInOctets":         "1.3.6.1.2.1.2.2.1.10",
-	"IfInUcastPkts":      "1.3.6.1.2.1.2.2.1.11",
-	"IfInMulticastPkts":  "1.3.6.1.2.1.31.1.1.1.2",
-	"IfInBroadcastPkts":  "1.3.6.1.2.1.31.1.1.1.3",
-	"IfInDiscards":       "1.3.6.1.2.1.2.2.1.13",
-	"IfInErrors":         "1.3.6.1.2.1.2.2.1.14",
-	"IfInUnknownProtos":  "1.3.6.1.2.1.2.2.1.15",
-	"IfOutOctets":        "1.3.6.1.2.1.2.2.1.16",
-	"IfOutUcastPkts":     "1.3.6.1.2.1.2.2.1.17",
-	"IfOutMulticastPkts": "1.3.6.1.2.1.31.1.1.1.4",
-	"IfOutBroadcastPkts": "1.3.6.1.2.1.31.1.1.1.5",
-	"IfOutDiscards":      "1.3.6.1.2.1.2.2.1.19",
-	"IfOutErrors":        "1.3.6.1.2.1.2.2.1.20",
+	"IfInOctets":         ".1.3.6.1.2.1.2.2.1.10",
+	"IfInUcastPkts":      ".1.3.6.1.2.1.2.2.1.11",
+	"IfInMulticastPkts":  ".1.3.6.1.2.1.31.1.1.1.2",
+	"IfInBroadcastPkts":  ".1.3.6.1.2.1.31.1.1.1.3",
+	"IfInDiscards":       ".1.3.6.1.2.1.2.2.1.13",
+	"IfInErrors":         ".1.3.6.1.2.1.2.2.1.14",
+	"IfInUnknownProtos":  ".1.3.6.1.2.1.2.2.1.15",
+	"IfOutOctets":        ".1.3.6.1.2.1.2.2.1.16",
+	"IfOutUcastPkts":     ".1.3.6.1.2.1.2.2.1.17",
+	"IfOutMulticastPkts": ".1.3.6.1.2.1.31.1.1.1.4",
+	"IfOutBroadcastPkts": ".1.3.6.1.2.1.31.1.1.1.5",
+	"IfOutDiscards":      ".1.3.6.1.2.1.2.2.1.19",
+	"IfOutErrors":        ".1.3.6.1.2.1.2.2.1.20",
 }
 
 var IfStatusOIDs = map[string]string{
-	"PhysicalAddress": "1.3.6.1.2.1.2.2.1.6",
-	"State":           "1.3.6.1.2.1.2.2.1.8",
-	"MTU":             "1.3.6.1.2.1.2.2.1.4",
-	"Speed":           "1.3.6.1.2.1.2.2.1.5",
+	"PhysicalAddress": ".1.3.6.1.2.1.2.2.1.6",
+	"State":           ".1.3.6.1.2.1.2.2.1.8",
+	"MTU":             ".1.3.6.1.2.1.2.2.1.4",
+	"Speed":           ".1.3.6.1.2.1.2.2.1.5",
 }

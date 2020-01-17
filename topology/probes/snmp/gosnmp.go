@@ -9,15 +9,16 @@ import (
 	"github.com/soniah/gosnmp"
 )
 
-// SnmpClient implements a wrapper around gosnmp.GoSNMP struct
+// Client implements a wrapper around gosnmp.GoSNMP struct
 // to provide additional functionalities for specific use cases
 // in this package
-type SnmpClient struct {
+type Client struct {
 	gosnmp *gosnmp.GoSNMP
 }
 
-func NewSnmpClient(target, community string) *SnmpClient {
-	return &SnmpClient{
+// NewSnmpClient create a new SNMP client
+func NewSnmpClient(target, community string) *Client {
+	return &Client{
 		gosnmp: &gosnmp.GoSNMP{
 			Port:               161,
 			Transport:          "udp",
@@ -33,7 +34,7 @@ func NewSnmpClient(target, community string) *SnmpClient {
 }
 
 // Connect is similar to gosnmp.GoSNMP.Connect
-func (c *SnmpClient) Connect() error {
+func (c *Client) Connect() error {
 	err := c.gosnmp.Connect()
 	if err != nil {
 		return errors.Wrapf(err, "Failed to connect to snmp agent at address %s", c.gosnmp.Target)
@@ -42,12 +43,12 @@ func (c *SnmpClient) Connect() error {
 }
 
 // Close closes current active connection
-func (c *SnmpClient) Close() {
+func (c *Client) Close() {
 	c.gosnmp.Conn.Close()
 }
 
 // Walk is similar to gosnmp.GoSNMP.Walk
-func (c *SnmpClient) Walk(rootOid string, walkFn gosnmp.WalkFunc) error {
+func (c *Client) Walk(rootOid string, walkFn gosnmp.WalkFunc) error {
 	err := c.gosnmp.Walk(rootOid, walkFn)
 	if err != nil {
 		return errors.Wrapf(err, "SnmpWalk on root OID %s at address %s error", rootOid, c.gosnmp.Target)
@@ -55,9 +56,24 @@ func (c *SnmpClient) Walk(rootOid string, walkFn gosnmp.WalkFunc) error {
 	return nil
 }
 
-// Get is similar to gosnmp.GoSNMP.Get, but the oids parameter is a
-// map from oid label to oid string
-func (c *SnmpClient) Get(oids map[string]string) (result *SnmpPayload, err error) {
+// Get takes an OID and return snmpget result
+func (c *Client) Get(oid string) (result interface{}, err error) {
+	pkt, err := c.gosnmp.Get([]string{oid})
+	if err != nil {
+		err = errors.Wrapf(err, "SnmpGet on OID %s at address %s error", oid, c.gosnmp.Target)
+		return
+	}
+	values, err := c.getPDUValues(pkt.Variables)
+	if err != nil {
+		err = errors.Wrapf(err, "SnmpGet unpack pdu values error")
+		return
+	}
+	result = values[0]
+	return
+}
+
+// GetMany takes a map of oids and return the result of snmpget command in a map
+func (c *Client) GetMany(oids map[string]string) (result *SnmpPayload, err error) {
 	result = &SnmpPayload{}
 	oidLabels, oidStrings := []string{}, []string{}
 	for label, oid := range oids {
@@ -80,9 +96,26 @@ func (c *SnmpClient) Get(oids map[string]string) (result *SnmpPayload, err error
 	return
 }
 
-// GetNext is similar to gosnmp.GoSNMP.GetNext, but instead of a slice
-// of oid string, it receives a map from oid label to oid string
-func (c *SnmpClient) GetNext(oids map[string]string) (nextOIDs map[string]string, result *SnmpPayload, err error) {
+// GetNext takes an OID and return snmpgetnext result
+func (c *Client) GetNext(oid string) (nextOID string, result interface{}, err error) {
+	pkt, err := c.gosnmp.GetNext([]string{oid})
+	if err != nil {
+		err = errors.Wrapf(err, "SnmpGetNext on OID %s at address %s error", oid, c.gosnmp.Target)
+		return
+	}
+
+	values, err := c.getPDUValues(pkt.Variables)
+	if err != nil {
+		err = errors.Wrapf(err, "SnmpGetNext unpack pdu values error")
+		return
+	}
+	nextOID = pkt.Variables[0].Name
+	result = values[0]
+	return
+}
+
+// GetNextMany takes a map of oids and return the result of snmpgetnext command in a map
+func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string, result *SnmpPayload, err error) {
 	nextOIDs = make(map[string]string)
 	result = &SnmpPayload{}
 	oidStrings := []string{}
@@ -108,24 +141,22 @@ func (c *SnmpClient) GetNext(oids map[string]string) (nextOIDs map[string]string
 	return
 }
 
-func (c *SnmpClient) getPDUValue(pdu gosnmp.SnmpPDU) (interface{}, error) {
+func (c *Client) getPDUValue(pdu gosnmp.SnmpPDU) (interface{}, error) {
 	switch pdu.Type {
 	case gosnmp.OctetString:
-		// NOTE: Hard code here to work with lldpd emulation tool.
 		pVal := pdu.Value.([]byte)
+		// Some MAC Addresses are encoded differently
 		if (strings.Contains(pdu.Name, ".1.0.8802.1.1.2.1.4.1.1.7") ||
-			strings.Contains(pdu.Name, "1.3.6.1.2.1.2.2.1.6") ||
+			strings.Contains(pdu.Name, ".1.3.6.1.2.1.2.2.1.6") ||
 			strings.Contains(pdu.Name, ".1.0.8802.1.1.2.1.3.2.0")) &&
 			len(pVal) == 6 {
-			hex_ := [6]string{}
-			hex := hex_[:]
-			for i, v := range pVal {
-				hex[i] = fmt.Sprintf("%02x", v)
+			var hex []string
+			for _, v := range pVal {
+				hex = append(hex, fmt.Sprintf("%02x", v))
 			}
 			return strings.Join(hex, ":"), nil
-		} else {
-			return string(pVal), nil
 		}
+		return string(pVal), nil
 	case gosnmp.NoSuchObject:
 		return nil, errors.New(
 			fmt.Sprintf("OID %s doesn't exist at target %s", pdu.Name, c.gosnmp.Target),
@@ -135,7 +166,7 @@ func (c *SnmpClient) getPDUValue(pdu gosnmp.SnmpPDU) (interface{}, error) {
 	}
 }
 
-func (c *SnmpClient) getPDUValues(pdus []gosnmp.SnmpPDU) ([]interface{}, error) {
+func (c *Client) getPDUValues(pdus []gosnmp.SnmpPDU) ([]interface{}, error) {
 	var res []interface{}
 	for _, pdu := range pdus {
 		val, err := c.getPDUValue(pdu)
