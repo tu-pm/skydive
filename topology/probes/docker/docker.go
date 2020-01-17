@@ -52,15 +52,19 @@ type containerInfo struct {
 // ProbeHandler describes a Docker topology graph that enhance the graph
 type ProbeHandler struct {
 	common.RWMutex
-	Ctx          tp.Context
-	nsProbe      *ns.ProbeHandler
-	url          string
-	client       *client.Client
-	hostNs       netns.NsHandle
-	containerMap map[string]containerInfo
+	Ctx            tp.Context
+	nsProbe        *ns.ProbeHandler
+	url            string
+	client         *client.Client
+	hostNs         netns.NsHandle
+	containerMap   map[string]containerInfo
+	procMountPoint string
 }
 
 func (p *ProbeHandler) containerNamespace(pid int) string {
+	if len(p.procMountPoint) > 0 {
+		return fmt.Sprintf("%s/%d/ns/net", p.procMountPoint, pid)
+	}
 	return fmt.Sprintf("/proc/%d/ns/net", pid)
 }
 
@@ -265,10 +269,12 @@ func (p *ProbeHandler) Init(ctx tp.Context, bundle *probe.Bundle) (probe.Handler
 
 	dockerURL := ctx.Config.GetString("agent.topology.docker.url")
 	netnsRunPath := ctx.Config.GetString("agent.topology.docker.netns.run_path")
+	procMountPoint := ctx.Config.GetString("agent.topology.docker.proc_mount")
 
 	p.nsProbe = nsHandler.(*ns.ProbeHandler)
 	p.url = dockerURL
 	p.containerMap = make(map[string]containerInfo)
+	p.procMountPoint = procMountPoint
 	p.Ctx = ctx
 
 	if netnsRunPath != "" {
