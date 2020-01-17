@@ -275,11 +275,12 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		// Delete nodes with the same mgmt address
 		// Reason: MgmtAddress must be unique between switches
-		mgmtAddress, _ := chassisMetadata.GetFieldString("LLDP.MgmtAddress")
-		dupNodes := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": mgmtAddress})
-		for _, node := range dupNodes {
-			if node != chassis {
-				p.Ctx.Graph.DelNode(node)
+		if mgmtAddress, _ := chassisMetadata.GetFieldString("LLDP.MgmtAddress"); len(mgmtAddress) > 0 {
+			dupNodes := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": mgmtAddress})
+			for _, node := range dupNodes {
+				if node != chassis {
+					p.Ctx.Graph.DelNode(node)
+				}
 			}
 		}
 
