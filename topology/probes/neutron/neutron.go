@@ -128,8 +128,6 @@ func (p *Probe) retrievePort(portMd portMetadata) (port ports.Port, err error) {
 		opts.MACAddress = portMd.mac
 	}
 
-	p.Ctx.Logger.Debugf("RETRIEVING ATTRIBUTES FROM NEUTRON PORT WITH OPTIONS: %+v", opts)
-
 	pager := ports.List(p.client, opts)
 
 	err = pager.EachPage(func(page pagination.Page) (bool, error) {
