@@ -29,8 +29,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/nlewo/contrail-introspect-cli/collection"
-	"github.com/nlewo/contrail-introspect-cli/descriptions"
+	"github.com/tu-pm/contrail-introspect-cli/collection"
+	"github.com/tu-pm/contrail-introspect-cli/descriptions"
 
 	"github.com/skydive-project/skydive/common"
 	"github.com/skydive-project/skydive/graffiti/graph"
@@ -127,10 +127,10 @@ func getVrfIdFromIntrospect(host string, port int, vrfName string) (vrfId int, e
 	if err != nil {
 		return
 	}
+	defer col.Close()
 	elem, err := col.SearchStrictUnique(vrfName)
 	if err != nil {
-		col.Close()
-		return 0, err
+		return
 	}
 	field, _ := elem.GetField("ucindex")
 	if field == "" {
