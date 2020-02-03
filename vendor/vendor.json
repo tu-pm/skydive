@@ -2305,24 +2305,6 @@
 			"revisionTime": "2019-08-08T13:38:57Z"
 		},
 		{
-			"checksumSHA1": "NY/yQ26e4WcmK6+IxMR6TWK0X2U=",
-			"path": "github.com/nlewo/contrail-introspect-cli/collection",
-			"revision": "0407b60f2edd766ca0406b923f076f9e0b9db2ab",
-			"revisionTime": "2018-10-03T13:52:17Z"
-		},
-		{
-			"checksumSHA1": "FyyqphRJoezUWIO8wunV5Q911/4=",
-			"path": "github.com/nlewo/contrail-introspect-cli/descriptions",
-			"revision": "0407b60f2edd766ca0406b923f076f9e0b9db2ab",
-			"revisionTime": "2018-10-03T13:52:17Z"
-		},
-		{
-			"checksumSHA1": "dc8PNRlEB9pbEJiJHjitlcJvH2I=",
-			"path": "github.com/nlewo/contrail-introspect-cli/utils",
-			"revision": "0407b60f2edd766ca0406b923f076f9e0b9db2ab",
-			"revisionTime": "2018-10-03T13:52:17Z"
-		},
-		{
 			"checksumSHA1": "gcLub3oB+u4QrOJZcYmk/y2AP4k=",
 			"path": "github.com/nu7hatch/gouuid",
 			"revision": "179d4d0c4d8d407a32af483c2354df1d2c91e6c3"
@@ -2705,6 +2687,30 @@
 			"path": "github.com/tebeka/selenium/internal/zip",
 			"revision": "657e45ec600f26e76da253936c1f2adb6978ff72",
 			"revisionTime": "2017-03-14T20:04:59Z"
+		},
+		{
+			"checksumSHA1": "Ih80/mWFUxlECeg6k46cYncRiEM=",
+			"path": "github.com/tu-pm/contrail-introspect-cli/collection",
+			"revision": "bf1cf80979a59c0e19bc6246a016800f9953fc30",
+			"revisionTime": "2020-02-01T10:13:41Z",
+			"version": "tupm",
+			"versionExact": "tupm"
+		},
+		{
+			"checksumSHA1": "Kfzr76GNuRet/9Spa+xyqxLNTjw=",
+			"path": "github.com/tu-pm/contrail-introspect-cli/descriptions",
+			"revision": "9bcd8e166b9f7d145fe4a7dcde474de5204c680c",
+			"revisionTime": "2020-02-01T10:13:41Z",
+			"version": "tupm",
+			"versionExact": "tupm"
+		},
+		{
+			"checksumSHA1": "i6D2lh1gF+k1ZTxL5LOZegXX/YA=",
+			"path": "github.com/tu-pm/contrail-introspect-cli/utils",
+			"revision": "9bcd8e166b9f7d145fe4a7dcde474de5204c680c",
+			"revisionTime": "2020-02-01T10:13:41Z",
+			"version": "tupm",
+			"versionExact": "tupm"
 		},
 		{
 			"checksumSHA1": "H81V2Jfwte/WYslbaG9ykrD1+Q8=",
