@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -364,6 +365,16 @@ func (p *Probe) getOrCreate(id graph.Identifier, m graph.Metadata) *graph.Node {
 	} else {
 		tr := p.Ctx.Graph.StartMetadataTransaction(node)
 		for k, v := range m {
+			// Do not update chassis ID field on cisco nexus switches
+			if k == "LLDP" {
+				cid, err := node.GetFieldString("LLDP.ChassisID")
+				cdesc, _ := node.GetFieldString("LLDP.Description")
+				if err == nil && strings.Contains(strings.ToLower(cdesc), "cisco nexus") {
+					v1 := v.(*Metadata)
+					v1.ChassisID = cid
+					v = v1
+				}
+			}
 			tr.AddMetadata(k, v)
 		}
 		tr.Commit()
