@@ -73,8 +73,8 @@ func (c *Client) Get(oid string) (result interface{}, err error) {
 }
 
 // GetMany takes a map of oids and return the result of snmpget command in a map
-func (c *Client) GetMany(oids map[string]string) (result *SnmpPayload, err error) {
-	result = &SnmpPayload{}
+func (c *Client) GetMany(oids map[string]string) (result *Payload, err error) {
+	result = &Payload{}
 	oidLabels, oidStrings := []string{}, []string{}
 	for label, oid := range oids {
 		oidLabels = append(oidLabels, label)
@@ -115,9 +115,9 @@ func (c *Client) GetNext(oid string) (nextOID string, result interface{}, err er
 }
 
 // GetNextMany takes a map of oids and return the result of snmpgetnext command in a map
-func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string, result *SnmpPayload, err error) {
+func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string, result *Payload, err error) {
 	nextOIDs = make(map[string]string)
-	result = &SnmpPayload{}
+	result = &Payload{}
 	oidStrings := []string{}
 	oidLabels, oidStrings := []string{}, []string{}
 	for label, oid := range oids {

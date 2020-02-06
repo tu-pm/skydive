@@ -6,10 +6,10 @@ import (
 	"reflect"
 )
 
-type SnmpPayload map[string]interface{}
+type Payload map[string]interface{}
 
 // SetValue adds a new key-value pair to the message payload.
-func (m *SnmpPayload) SetValue(k string, v interface{}) {
+func (m *Payload) SetValue(k string, v interface{}) {
 	switch v := v.(type) {
 	case string:
 		// Don't set if value is an empty string
@@ -30,13 +30,13 @@ func (m *SnmpPayload) SetValue(k string, v interface{}) {
 	(*m)[k] = v
 }
 
-// InitStruct convert SnmpPayload to a struct with the following
+// InitStruct convert Payload to a struct with the following
 // conditions:
 // 1. Map keys are the same as struct field names
 // 2. Map values are of the same types as struct values
 // 3. s is pointer to struct, not the struct itself
 // 4. s fields have to be publicly accessible to be set value
-func (m *SnmpPayload) InitStruct(s interface{}) error {
+func (m *Payload) InitStruct(s interface{}) error {
 	structValue := reflect.ValueOf(s).Elem()
 	for name, value := range *m {
 		structFieldValue := structValue.FieldByName(name)

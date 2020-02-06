@@ -77,7 +77,7 @@ var LldpRemoteChassisMgmtAddressOID = ".1.0.8802.1.1.2.1.4.2.1.4"
 
 // IF-MIB OIDs
 
-var IfDescrOID = "1.3.6.1.2.1.2.2.1.2"
+var IfNameOID = "1.3.6.1.2.1.31.1.1.1.1"
 
 var IfMetricOIDs = map[string]string{
 	"IfInOctets":         ".1.3.6.1.2.1.2.2.1.10",
@@ -95,7 +95,7 @@ var IfMetricOIDs = map[string]string{
 	"IfOutErrors":        ".1.3.6.1.2.1.2.2.1.20",
 }
 
-var IfStatusOIDs = map[string]string{
+var IfConfigOIDs = map[string]string{
 	"PhysicalAddress": ".1.3.6.1.2.1.2.2.1.6",
 	"State":           ".1.3.6.1.2.1.2.2.1.8",
 	"MTU":             ".1.3.6.1.2.1.2.2.1.4",

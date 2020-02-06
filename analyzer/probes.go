@@ -67,10 +67,7 @@ func NewTopologyProbeBundleFromConfig(g *graph.Graph) (*probe.Bundle, error) {
 			handler, err = contrailservicechain.NewProbe(g)
 		case "snmp":
 			community := config.GetString("analyzer.topology.snmp.community")
-			target := config.GetString("analyzer.topology.snmp.target")
-			refreshing := config.GetInt("analyzer.topology.snmp.refreshing")
-			sampling := config.GetInt("analyzer.topology.snmp.sampling")
-			handler, err = snmp.NewProbe(g, community, target, refreshing, sampling)
+			handler, err = snmp.NewProbe(g, community)
 		default:
 			logging.GetLogger().Errorf("unknown probe type: %s", t)
 			continue
