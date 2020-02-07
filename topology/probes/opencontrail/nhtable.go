@@ -23,9 +23,6 @@ func getNexthopsFromIntrospect(host string, port int, vrfName string) (nhs []NHT
 	elems := col.Search(func(string, string) string {
 		return "__Inet4UcRouteResp_list/Inet4UcRouteResp/route_list/list/RouteUcSandeshData"
 	}, "", "")
-	col.Search(func(string, string) string {
-		return "__Inet4UcRouteResp_list/Inet4UcRouteResp/route_list/list/RouteUcSandeshData"
-	}, "", "")
 
 	for _, elem := range elems {
 		routeType, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
