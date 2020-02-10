@@ -61,13 +61,19 @@ func genSwitchID(m *Payload) graph.Identifier {
 	if len((*m)["MgmtAddress"].(string)) == 0 {
 		panic(fmt.Sprintf("Switch %+v doesn't have a management address", *m))
 	}
-	sysName, ok := (*m)["SysName"].(string)
-	if !ok {
-		panic(fmt.Sprintf("Switch %+v sysname is not a string", *m))
-	}
 	mgmtAddress, ok := (*m)["MgmtAddress"].(string)
 	if !ok {
 		panic(fmt.Sprintf("Switch %+v mgmt address is not a string", *m))
+	}
+	// Fix bug: http://10.240.203.2:8180/sdn/know-how/issues/133#note_96745
+	var sysName string
+	switch v := (*m)["SysName"].(type) {
+	case string:
+		sysName = v
+	case uint64:
+		sysName = strconv.FormatUint(v, 10)
+	default:
+		panic(fmt.Sprintf("Switch %+v unexpected type %T", *m, v))
 	}
 	// Generate ChassisID from its metadata
 	return graph.GenID(sysName, "SysName", mgmtAddress, "MgmtAddress")

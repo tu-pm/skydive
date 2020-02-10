@@ -1,6 +1,8 @@
 package snmp
 
 import (
+	"fmt"
+
 	"github.com/skydive-project/skydive/graffiti/graph"
 	"github.com/skydive-project/skydive/logging"
 	"github.com/skydive-project/skydive/topology"
@@ -67,15 +69,24 @@ func lldpRequest(target, community string) *lldpResponse {
 			if err != nil {
 				return err
 			}
+
+			// Bug type conversion error
+			locPortIDString, ok := (*locPort)["PortID"].(string)
+			if !ok {
+				panic(fmt.Sprintf("local port id type mismatch, locport=%+v", *locPort))
+			}
+			remPortIDString, ok := remPortID.(string)
+			if !ok {
+				panic(fmt.Sprintf("remote port id type mismatch, id=%+v, type=%T", remPortID, remPortID))
+			}
 			// If two switches are stacked together, each pair of stacked ports will have
 			// two port connecting to each other by a layer2 link. They then exchange
 			// LLDP messages between themselves, results in two rows in the LldpRemAddr Table
 			// having the same address as the switch's management address.
 			// Here we just ignore such cases to avoid further confusions
 			if remAddr != target {
-				locPortID := (*locPort)["PortID"].(string)
-				locPorts[locPortID] = locPort
-				links[locPortID] = remoteInfo{remAddr, remPortID.(string)}
+				locPorts[locPortIDString] = locPort
+				links[locPortIDString] = remoteInfo{remAddr, remPortIDString}
 			}
 			remPortOID = nextOID
 			return nil
