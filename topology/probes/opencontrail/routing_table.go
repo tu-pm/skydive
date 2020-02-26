@@ -53,30 +53,36 @@ import (
 type rtMonitorRoute struct {
 	Operation string
 	Family    string
-	VrfId     int `json:"vrf_id"`
+	VrfID     int `json:"vrf_id"`
 	Prefix    int
 	Address   string
-	NhId      int `json:"nh_id"`
+	NhID      int `json:"nh_id"`
 }
 
 const afInetFamily string = "AF_INET"
 
+// RouteProtocol is the default protocol for contrail routes
 const RouteProtocol int64 = 200
 
 type interfaceUpdate struct {
 	InterfaceUUID string
-	VrfId         int
+	VrfID         int
 }
 
 type routingTableUpdateType int
 
 const (
+	// AddRoute event
 	AddRoute routingTableUpdateType = iota
+	// DelRoute event
 	DelRoute
+	// AddInterface event
 	AddInterface
+	// DelInterface event
 	DelInterface
 )
 
+// RoutingTableUpdate describes the structure of messages being passed to updater chan
 type RoutingTableUpdate struct {
 	action routingTableUpdateType
 	route  rtMonitorRoute
@@ -86,7 +92,7 @@ type RoutingTableUpdate struct {
 // routingTableUpdater serializes route update on both routing tables
 // and interfaces.
 func (p *Probe) routingTableUpdater() {
-	var vrfId int
+	var vrfID int
 	p.Ctx.Logger.Debug("Starting routingTableUpdater...")
 	for a := range p.routingTableUpdaterChan {
 		switch a.action {
@@ -95,37 +101,37 @@ func (p *Probe) routingTableUpdater() {
 				Protocol: RouteProtocol,
 				Prefix:   fmt.Sprintf("%s/%d", a.route.Address, a.route.Prefix),
 				Family:   a.route.Family,
-				NhID:     int64(a.route.NhId)}
-			p.addRoute(a.route.VrfId, ocRoute)
-			vrfId = a.route.VrfId
+				NhID:     int64(a.route.NhID)}
+			p.addRoute(a.route.VrfID, ocRoute)
+			vrfID = a.route.VrfID
 		case DelRoute:
 			ocRoute := &Route{
 				Protocol: RouteProtocol,
 				Prefix:   fmt.Sprintf("%s/%d", a.route.Address, a.route.Prefix),
 				Family:   a.route.Family,
-				NhID:     int64(a.route.NhId)}
-			p.delRoute(a.route.VrfId, ocRoute)
-			vrfId = a.route.VrfId
+				NhID:     int64(a.route.NhID)}
+			p.delRoute(a.route.VrfID, ocRoute)
+			vrfID = a.route.VrfID
 		case AddInterface:
-			p.addInterface(a.intf.VrfId, a.intf.InterfaceUUID)
-			vrfId = a.intf.VrfId
+			p.addInterface(a.intf.VrfID, a.intf.InterfaceUUID)
+			vrfID = a.intf.VrfID
 		case DelInterface:
 			var err error
-			if vrfId, err = p.deleteInterface(a.intf.InterfaceUUID); err != nil {
+			if vrfID, err = p.deleteInterface(a.intf.InterfaceUUID); err != nil {
 				continue
 			}
 		}
-		p.onRouteChanged(vrfId)
+		p.onRouteChanged(vrfID)
 	}
 }
 
-func (p *Probe) getOrCreateRoutingTable(vrfId int) *RoutingTable {
-	vrf, exists := p.routingTables[vrfId]
+func (p *Probe) getOrCreateRoutingTable(vrfID int) *RoutingTable {
+	vrf, exists := p.routingTables[vrfID]
 	if !exists {
-		p.Ctx.Logger.Debugf("Creating a new VRF with ID %d", vrfId)
+		p.Ctx.Logger.Debugf("Creating a new VRF with ID %d", vrfID)
 
 		var err error
-		if vrf, err = p.vrfInit(vrfId); err != nil {
+		if vrf, err = p.vrfInit(vrfID); err != nil {
 			p.Ctx.Logger.Error(err)
 			return nil
 		}
@@ -133,23 +139,23 @@ func (p *Probe) getOrCreateRoutingTable(vrfId int) *RoutingTable {
 	return vrf
 }
 
-func (p *Probe) addInterface(vrfId int, interfaceUUID string) {
-	if vrf := p.getOrCreateRoutingTable(vrfId); vrf != nil {
-		p.Ctx.Logger.Debugf("Appending interface %s to VRF %d...", interfaceUUID, vrfId)
+func (p *Probe) addInterface(vrfID int, interfaceUUID string) {
+	if vrf := p.getOrCreateRoutingTable(vrfID); vrf != nil {
+		p.Ctx.Logger.Debugf("Appending interface %s to VRF %d...", interfaceUUID, vrfID)
 		vrf.InterfacesUUID = append(vrf.InterfacesUUID, interfaceUUID)
 	}
 }
 
-func (p *Probe) OnInterfaceAdded(vrfId int, interfaceUUID string) {
+func (p *Probe) OnInterfaceAdded(vrfID int, interfaceUUID string) {
 	p.routingTableUpdaterChan <- RoutingTableUpdate{
 		action: AddInterface,
-		intf:   interfaceUpdate{InterfaceUUID: interfaceUUID, VrfId: vrfId},
+		intf:   interfaceUpdate{InterfaceUUID: interfaceUUID, VrfID: vrfID},
 	}
 }
 
 // deleteInterface removes interfaces from Vrf. If a Vrf no longer has
 // any interfaces, this Vrf is removed.
-func (p *Probe) deleteInterface(interfaceUUID string) (vrfId int, err error) {
+func (p *Probe) deleteInterface(interfaceUUID string) (vrfID int, err error) {
 	var found bool
 	for k, vrf := range p.routingTables {
 		for idx, intf := range vrf.InterfacesUUID {
@@ -168,7 +174,7 @@ func (p *Probe) deleteInterface(interfaceUUID string) (vrfId int, err error) {
 			}
 		}
 	}
-	return 0, errors.New("No VrfId was found")
+	return 0, errors.New("no vrfid was found")
 }
 
 func (p *Probe) OnInterfaceDeleted(interfaceUUID string) {
@@ -180,17 +186,17 @@ func (p *Probe) OnInterfaceDeleted(interfaceUUID string) {
 
 // onRouteChanged writes the Contrail routing table into the
 // Contrail.RoutingTable metadata attribute.
-func (p *Probe) onRouteChanged(vrfId int) {
-	vrf := p.getOrCreateRoutingTable(vrfId)
+func (p *Probe) onRouteChanged(vrfID int) {
+	vrf := p.getOrCreateRoutingTable(vrfID)
 
 	p.Ctx.Graph.Lock()
 	defer p.Ctx.Graph.Unlock()
 
-	filter := graph.NewElementFilter(filters.NewTermInt64Filter("Contrail.VRFID", int64(vrfId)))
+	filter := graph.NewElementFilter(filters.NewTermInt64Filter("Contrail.VRFID", int64(vrfID)))
 	intfs := p.Ctx.Graph.GetNodes(filter)
 
 	if len(intfs) == 0 {
-		p.Ctx.Logger.Debugf("No interface with VRF index %d was found (on route add)", vrfId)
+		p.Ctx.Logger.Debugf("No interface with VRF index %d was found (on route add)", vrfID)
 		return
 	}
 
@@ -208,9 +214,9 @@ func (p *Probe) onRouteChanged(vrfId int) {
 	}
 }
 
-func (p *Probe) addRoute(vrfId int, route *Route) {
-	if vrf := p.getOrCreateRoutingTable(vrfId); vrf != nil {
-		p.Ctx.Logger.Debugf("Adding route %v to vrf %d", route, vrfId)
+func (p *Probe) addRoute(vrfID int, route *Route) {
+	if vrf := p.getOrCreateRoutingTable(vrfID); vrf != nil {
+		p.Ctx.Logger.Debugf("Adding route %v to vrf %d", route, vrfID)
 		for _, r := range vrf.Routes {
 			if r == route {
 				return
@@ -220,25 +226,25 @@ func (p *Probe) addRoute(vrfId int, route *Route) {
 	}
 }
 
-func (p *Probe) delRoute(vrfId int, route *Route) {
-	if vrf := p.getOrCreateRoutingTable(vrfId); vrf != nil {
+func (p *Probe) delRoute(vrfID int, route *Route) {
+	if vrf := p.getOrCreateRoutingTable(vrfID); vrf != nil {
 		for i, r := range vrf.Routes {
 			if r.Prefix == route.Prefix {
-				p.Ctx.Logger.Debugf("Removing route %s from vrf %d ", r.Prefix, vrfId)
+				p.Ctx.Logger.Debugf("Removing route %s from vrf %d ", r.Prefix, vrfID)
 				vrf.Routes[i] = vrf.Routes[len(vrf.Routes)-1]
 				vrf.Routes = vrf.Routes[:len(vrf.Routes)-1]
 				return
 			}
 		}
-		p.Ctx.Logger.Errorf("Can not remove route %v from vrf %d because route has not been found", route, vrfId)
+		p.Ctx.Logger.Errorf("Can not remove route %v from vrf %d because route has not been found", route, vrfID)
 	}
 }
 
-// vrfInit uses the Contrail binary rt --dump to get all routes of a VRF.
-func (p *Probe) vrfInit(vrfId int) (*RoutingTable, error) {
-	p.Ctx.Logger.Debugf("Initialization of VRF %d...", vrfId)
+// vrfInit uswes the Contrail binary rt --dump to get all routes of a VRF.
+func (p *Probe) vrfInit(vrfID int) (*RoutingTable, error) {
+	p.Ctx.Logger.Debugf("Initialization of VRF %d...", vrfID)
 
-	cmd := exec.Command("rt", "--dump", fmt.Sprint(vrfId))
+	cmd := exec.Command("rt", "--dump", fmt.Sprint(vrfID))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -283,7 +289,7 @@ func (p *Probe) vrfInit(vrfId int) (*RoutingTable, error) {
 		})
 	}
 
-	p.routingTables[vrfId] = vrf
+	p.routingTables[vrfID] = vrf
 	return vrf, nil
 }
 

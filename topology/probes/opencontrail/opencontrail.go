@@ -221,7 +221,7 @@ func (p *Probe) nodeUpdater() {
 			return
 		}
 
-		if tp, _ := node.GetFieldString("Type"); tp == "vhost" && strings.Contains(name, "vhost") {
+		if pt, _ := node.GetFieldString("Type"); pt == "vhost" && strings.Contains(name, "vhost") {
 			p.onVhostAdded(node, itf)
 		} else {
 			p.Ctx.Logger.Debugf("Retrieve extIDs for %s", name)
@@ -274,7 +274,7 @@ func (p *Probe) enhanceNode(node *graph.Node) {
 }
 
 // OnNodeUpdated event
-func (p *Probe) OnNodeUpdated(n *graph.Node) {
+func (p *Probe) OnNodeUpdated(*graph.Node) {
 	return
 }
 
@@ -303,8 +303,8 @@ func (p *Probe) OnNodeDeleted(n *graph.Node) {
 func (p *Probe) Start() {
 	p.Ctx.Graph.AddEventListener(p)
 	go p.nodeUpdater()
-	go p.rtMonitor()
-	go p.tunnelUpdater()
+	// go p.rtMonitor()
+	// go p.tunnelUpdater()
 }
 
 // Stop the probe
@@ -316,7 +316,7 @@ func (p *Probe) Stop() {
 }
 
 // Init initializes a new OpenContrail probe based on configuration
-func (p *Probe) Init(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
+func (p *Probe) Init(ctx tp.Context, _ *probe.Bundle) (probe.Handler, error) {
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 
 	p.Ctx = ctx
