@@ -2691,26 +2691,20 @@
 		{
 			"checksumSHA1": "Ih80/mWFUxlECeg6k46cYncRiEM=",
 			"path": "github.com/tu-pm/contrail-introspect-cli/collection",
-			"revision": "bf1cf80979a59c0e19bc6246a016800f9953fc30",
-			"revisionTime": "2020-02-01T10:13:41Z",
-			"version": "tupm",
-			"versionExact": "tupm"
+			"revision": "ffb836fa1a17527fbdba8df54457ba1e8fb9e3c0",
+			"revisionTime": "2020-02-25T09:11:45Z"
 		},
 		{
-			"checksumSHA1": "Kfzr76GNuRet/9Spa+xyqxLNTjw=",
+			"checksumSHA1": "q7I5C4tMC/u5zTWA/wdpHeJ216Q=",
 			"path": "github.com/tu-pm/contrail-introspect-cli/descriptions",
-			"revision": "9bcd8e166b9f7d145fe4a7dcde474de5204c680c",
-			"revisionTime": "2020-02-01T10:13:41Z",
-			"version": "tupm",
-			"versionExact": "tupm"
+			"revision": "ffb836fa1a17527fbdba8df54457ba1e8fb9e3c0",
+			"revisionTime": "2020-02-25T09:11:45Z"
 		},
 		{
 			"checksumSHA1": "i6D2lh1gF+k1ZTxL5LOZegXX/YA=",
 			"path": "github.com/tu-pm/contrail-introspect-cli/utils",
-			"revision": "9bcd8e166b9f7d145fe4a7dcde474de5204c680c",
-			"revisionTime": "2020-02-01T10:13:41Z",
-			"version": "tupm",
-			"versionExact": "tupm"
+			"revision": "ffb836fa1a17527fbdba8df54457ba1e8fb9e3c0",
+			"revisionTime": "2020-02-25T09:11:45Z"
 		},
 		{
 			"checksumSHA1": "H81V2Jfwte/WYslbaG9ykrD1+Q8=",
