@@ -389,6 +389,10 @@ func NewServerFromConfig() (*Server, error) {
 	api.RegisterStatusAPI(hserver, s, apiAuthBackend)
 	api.RegisterWorkflowCallAPI(hserver, apiAuthBackend, apiServer, g, tr)
 
+	// if config.GetBool("analyzer.tf_api_enabled") {
+	api.RegisterTungstenFabricAPI(hserver, g, apiAuthBackend)
+	// }
+
 	if config.GetBool("analyzer.ssh_enabled") {
 		if err := dede.RegisterHandler("terminal", "/dede", hserver.Router); err != nil {
 			return nil, err
