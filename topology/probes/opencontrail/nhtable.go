@@ -13,7 +13,7 @@ import (
 
 func getNexthopsFromIntrospect(host string, port int, vrfName string) (nhs []NHTunnel, err error) {
 	col, err := collection.LoadCollection(
-		descriptions.Route(),
+		descriptions.UcRoute(),
 		[]string{fmt.Sprintf("%s:%d", host, port), vrfName},
 	)
 	if err != nil {
