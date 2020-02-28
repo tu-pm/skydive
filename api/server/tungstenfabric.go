@@ -17,17 +17,7 @@ import (
 	auth "github.com/abbot/go-http-auth"
 	"github.com/skydive-project/skydive/graffiti/graph"
 	shttp "github.com/skydive-project/skydive/http"
-	"github.com/skydive-project/skydive/rbac"
 )
-
-// NotImplementedError deals with unexpected data while parsing contrail introspect data
-type NotImplementedError struct {
-	errString string
-}
-
-func (e NotImplementedError) Error() string {
-	return e.errString
-}
 
 // TungstenFabricAPI exposes TungstenFabric query API
 type TungstenFabricAPI struct {
@@ -36,13 +26,22 @@ type TungstenFabricAPI struct {
 
 // NH contains next hop information
 type NH struct {
+	VrouterIP string
 	Type      string
+	Vrf       string
 	Interface string
 	SrcIP     string
 	DestIP    string
 	TunType   string
 	Label     string
 	VNI       string
+}
+
+// Link describes a link between two graph node on the path
+type Link struct {
+	Parent   string
+	Child    string
+	Metadata graph.Metadata
 }
 
 func getHostNode(g *graph.Graph, n *graph.Node) *graph.Node {
@@ -71,13 +70,47 @@ func commonPrefixLength(x, y string, mask int) (cpl int, err error) {
 	return cpl, nil
 }
 
-func lookupVrfNH(vrIP, vrfName, path string) (nh *NH, err error) {
+func lookupL2NH(vrIP, vrfName, mac string) (nh *NH, err error) {
 	// Load Route collection from vrouter's introspect API
 	col, _ := collection.LoadCollection(
-		descriptions.Route(),
+		descriptions.L2Route(),
 		[]string{fmt.Sprintf("%s:%d", vrIP, 8085), vrfName},
 	)
+	defer col.Close()
 
+	elem, err := col.SearchStrictUnique(mac)
+	if err != nil {
+		return nil, err
+	}
+	nhType, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
+	vrf, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
+	sourceIP, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
+	destIP, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
+	itf, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
+	tunType, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/tunnel_type")
+	label, _ := elem.GetField("path_list/list/PathSandeshData[1]/label")
+	vni, _ := elem.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
+
+	nh = &NH{
+		VrouterIP: vrIP,
+		Type:      nhType,
+		Vrf:       vrf,
+		Interface: itf,
+		SrcIP:     sourceIP,
+		DestIP:    destIP,
+		TunType:   tunType,
+		Label:     label,
+		VNI:       vni,
+	}
+	return
+}
+
+func lookupUcNH(vrIP, vrfName, path string) (nh *NH, err error) {
+	// Load Route collection from vrouter's introspect API
+	col, _ := collection.LoadCollection(
+		descriptions.UcRoute(),
+		[]string{fmt.Sprintf("%s:%d", vrIP, 8085), vrfName},
+	)
 	defer col.Close()
 
 	// Search for RouteUcSandeshData elements
@@ -104,7 +137,8 @@ func lookupVrfNH(vrIP, vrfName, path string) (nh *NH, err error) {
 	if mlen == -1 {
 		return nil, fmt.Errorf("Route not found, vrouter: %s, vrf: %s, lookup: %s", vrIP, vrfName, path)
 	}
-	routeType, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
+	nhType, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
+	vrf, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
 	sourceIP, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
 	destIP, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
 	itf, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
@@ -113,7 +147,9 @@ func lookupVrfNH(vrIP, vrfName, path string) (nh *NH, err error) {
 	vni, _ := matched.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
 
 	nh = &NH{
-		Type:      routeType,
+		VrouterIP: vrIP,
+		Type:      nhType,
+		Vrf:       vrf,
 		Interface: itf,
 		SrcIP:     sourceIP,
 		DestIP:    destIP,
@@ -134,13 +170,16 @@ func lookupVxlanNH(vrIP string, vxlanID string) (*NH, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Route not found, vrouter: %s, vxlanID: %s", vrIP, vxlanID)
 	}
-	routeType, _ := elem.GetField("nh/NhSandeshData/type")
+	nhType, _ := elem.GetField("nh/NhSandeshData/type")
+	vrf, _ := elem.GetField("nh/NhSandeshData/vrf")
 	sourceIP, _ := elem.GetField("nh/NhSandeshData/sip")
 	destIP, _ := elem.GetField("nh/NhSandeshData/dip")
 	itf, _ := elem.GetField("nh/NhSandeshData/itf")
 	tunType, _ := elem.GetField("nh/NhSandeshData/tunnel_type")
 	return &NH{
-		Type:      routeType,
+		VrouterIP: vrIP,
+		Type:      nhType,
+		Vrf:       vrf,
 		Interface: itf,
 		SrcIP:     sourceIP,
 		DestIP:    destIP,
@@ -159,13 +198,16 @@ func lookupMplsNH(vrIP string, label string) (nh *NH, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("Route not found, vrouter: %s, mpls label: %s", vrIP, label)
 	}
-	routeType, _ := elem.GetField("nh/NhSandeshData/type")
+	nhType, _ := elem.GetField("nh/NhSandeshData/type")
+	vrf, _ := elem.GetField("nh/NhSandeshData/vrf")
 	sourceIP, _ := elem.GetField("nh/NhSandeshData/sip")
 	destIP, _ := elem.GetField("nh/NhSandeshData/dip")
 	itf, _ := elem.GetField("nh/NhSandeshData/itf")
 	tunType, _ := elem.GetField("nh/NhSandeshData/tunnel_type")
 	return &NH{
-		Type:      routeType,
+		VrouterIP: vrIP,
+		Type:      nhType,
+		Vrf:       vrf,
 		Interface: itf,
 		SrcIP:     sourceIP,
 		DestIP:    destIP,
@@ -174,10 +216,43 @@ func lookupMplsNH(vrIP string, label string) (nh *NH, err error) {
 	}, nil
 }
 
-func newEdge(g *graph.Graph, parent, child *graph.Node, m graph.Metadata) *graph.Edge {
+func connectTaps(g *graph.Graph, srcTap, destTap *graph.Node, destIP string) (flowType string, nh *NH, err error) {
+	// Extract src vrouter IP
+	vhost := g.LookupFirstChild(srcTap, graph.Metadata{"Type": "vhost"})
+	if vhost == nil {
+		tapName, _ := srcTap.GetFieldString("Name")
+		return "", nil, fmt.Errorf("vhost interface for tap %s not found", tapName)
+	}
+	vrIPs, err := vhost.GetFieldStringList("IPV4")
+	if err != nil {
+		return "", nil, err
+	}
+	// Determine what kind of table to lookup on from given addresses
+	srcVrf, err := srcTap.GetFieldString("Contrail.VRF")
+	if err != nil {
+		return "", nil, err
+	}
+	destVrf, err := destTap.GetFieldString("Contrail.VRF")
+	if err != nil {
+		return "", nil, err
+	}
+	logging.GetLogger().Infof("@@@ START: srcVrf: %s, destIP: %s\n", srcVrf, destIP)
+	if srcVrf != destVrf {
+		flowType = "L3"
+		nh, err = lookupUcNH(strings.Split(vrIPs[0], "/")[0], srcVrf, destIP)
+		logging.GetLogger().Infof("@@@: Diff net, search uc table => nh: %+v\n", nh)
+	} else {
+		flowType = "L2"
+		mac, _ := destTap.GetFieldString("Contrail.MAC")
+		nh, err = lookupL2NH(strings.Split(vrIPs[0], "/")[0], srcVrf, mac)
+		logging.GetLogger().Infof("@@@: Same net, search l2 table => nh: %+v\n", nh)
+	}
+	return
+}
+
+func newLink(parent, child *graph.Node, m graph.Metadata) Link {
 	m["Type"] = "overlay-flow"
-	e, _ := g.NewEdge(graph.GenID(string(parent.ID), string(child.ID), "flow-edge"), parent, child, m)
-	return e
+	return Link{string(parent.ID), string(child.ID), m}
 }
 
 func ipToTap(g *graph.Graph, ip string) (tap *graph.Node) {
@@ -206,10 +281,10 @@ func ipToVhost(g *graph.Graph, ip string) (vhost *graph.Node) {
 	return nil
 }
 
-func tracePath(g *graph.Graph, srcIP, destIP string) ([]*graph.Edge, error) {
-	g.RLock()
-	defer g.RUnlock()
-	var edges []*graph.Edge
+func tracePath(g *graph.Graph, srcIP, destIP string) ([]Link, error) {
+	var links []Link
+	// Get required nodes. If any of these nodes are missing,
+	// the lookup operation should fail immediately
 	srcTap := ipToTap(g, srcIP)
 	if srcTap == nil {
 		return nil, fmt.Errorf("Tap interface with IP %s not found", srcIP)
@@ -228,38 +303,29 @@ func tracePath(g *graph.Graph, srcIP, destIP string) ([]*graph.Edge, error) {
 		tapName, _ := destTap.GetFieldString("Name")
 		return nil, fmt.Errorf("VM attached to tap %s not found", tapName)
 	}
-	edges = append(edges, newEdge(g, srcVM, srcTap, graph.Metadata{"Description": "vm-to-tap"}))
+	// The first link is always from srcVM to srcTap
+	links = append(links, newLink(srcVM, srcTap, graph.Metadata{"Description": "vm-to-tap"}))
 
-	vhost := g.LookupFirstChild(srcTap, graph.Metadata{"Type": "vhost"})
-	if vhost == nil {
-		tapName, _ := srcTap.GetFieldString("Name")
-		return nil, fmt.Errorf("vhost interface for tap %s not found", tapName)
-	}
-	vrIPs, err := vhost.GetFieldStringList("IPV4")
-	if err != nil {
-		return nil, err
-	}
-	vrfName, err := srcTap.GetFieldString("Contrail.VRF")
-	if err != nil {
-		return nil, err
-	}
-	nh, _ := lookupVrfNH(strings.Split(vrIPs[0], "/")[0], vrfName, destIP)
+	flowType, nh, err := connectTaps(g, srcTap, destTap, destIP)
 	for node := srcTap; node != destTap; {
-		if nh == nil {
-			return nil, nil
+		if err != nil {
+			return nil, err
 		}
 		switch {
 		case nh.Type == "interface":
+			tapName, _ := destTap.GetFieldString("Name")
+			logging.GetLogger().Infof("@@@: END: Arrived at: %s\n", tapName)
 			// "interface" type indicates that nh is the destTap interface
 			var m graph.Metadata
 			if nodeType, _ := node.GetFieldString("Type"); nodeType == "vhost" {
-				m = edges[len(edges)-1].Metadata
+				m = links[len(links)-1].Metadata
 			} else {
 				m = graph.Metadata{"Description": "tap-to-tap"}
 			}
-			edges = append(edges, newEdge(g, node, destTap, m))
+			links = append(links, newLink(node, destTap, m))
 			node = destTap
 		case nh.Type == "tunnel":
+			logging.GetLogger().Infof("@@@: ECAP TUNNEL: %+v\n", nh)
 			// "tunnel" type indicates that nh is the vhost interface on another compute node
 			vhost := ipToVhost(g, nh.SrcIP)
 			if vhost == nil {
@@ -275,60 +341,64 @@ func tracePath(g *graph.Graph, srcIP, destIP string) ([]*graph.Edge, error) {
 
 			if nh.TunType == "VXLAN" {
 				m["VNI"] = nh.VNI
-				nh, _ = lookupVxlanNH(nh.DestIP, nh.VNI)
-				if err != nil {
-					return nil, err
-				}
+				nh, err = lookupVxlanNH(nh.DestIP, nh.VNI)
 			} else {
 				m["Label"] = nh.Label
-				nh, _ = lookupMplsNH(nh.DestIP, nh.Label)
-				if err != nil {
-					return nil, err
-				}
+				nh, err = lookupMplsNH(nh.DestIP, nh.Label)
 			}
-			edges = append(
-				edges,
-				newEdge(g, node, vhost, m),
-				newEdge(g, vhost, host, m),
-				newEdge(g, host, nextHost, m),
-				newEdge(g, nextHost, nextVhost, m),
+			links = append(
+				links,
+				newLink(node, vhost, m),
+				newLink(vhost, host, m),
+				newLink(host, nextHost, m),
+				newLink(nextHost, nextVhost, m),
 			)
 			node = nextVhost
+		case nh.Type == "vrf":
+			logging.GetLogger().Infof("@@@: VRF TRANSLATE: %+v\n", nh)
+			if flowType == "L3" {
+				nh, err = lookupUcNH(nh.VrouterIP, nh.Vrf, destIP)
+			} else {
+				destMAC, _ := destTap.GetFieldString("Contrail.MAC")
+				nh, err = lookupL2NH(nh.VrouterIP, nh.Vrf, destMAC)
+			}
 		case nh.Type == "discard":
 			return nil, nil
 		default:
 			// There's a indirect route from source to destination IP
-			edges = []*graph.Edge{
-				edges[0],
-				newEdge(g, srcTap, destTap, graph.Metadata{"Description": "unknown"}),
+			logging.GetLogger().Infof("@@@: Unknown NH: %+v\n", nh)
+			links = []Link{
+				links[0],
+				newLink(srcTap, destTap, graph.Metadata{"Description": "unknown"}),
 			}
 			node = destTap
 		}
 	}
-	edges = append(edges, newEdge(g, destTap, destVM, graph.Metadata{"Description": "tap-to-vm"}))
-	return edges, nil
+	links = append(links, newLink(destTap, destVM, graph.Metadata{"Description": "tap-to-vm"}))
+	logging.GetLogger().Info("tupm: function result:", links)
+	return links, nil
 }
 
 func (tf *TungstenFabricAPI) pathTracingHandler(w http.ResponseWriter, r *auth.AuthenticatedRequest) {
-	if !rbac.Enforce(r.Username, "topology", "read") {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+	// TODO: Add validator
+	//
+
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
 	values := r.URL.Query()
 	if len(values["src-ip"]) != 1 || len(values["dest-ip"]) != 1 {
 		return
 	}
 	srcIP, destIP := values["src-ip"][0], values["dest-ip"][0]
-	edges, err := tracePath(tf.graph, srcIP, destIP)
+	links, err := tracePath(tf.graph, srcIP, destIP)
 	if err != nil {
 		logging.GetLogger().Error(err)
 	}
 	// Bypass the marshalling nil slices behaviour
-	if len(edges) == 0 {
-		edges = make([]*graph.Edge, 0)
+	if len(links) == 0 {
+		links = make([]Link, 0)
 	}
-	je, _ := json.Marshal(edges)
+	je, _ := json.Marshal(links)
 	w.Write(je)
 }
 

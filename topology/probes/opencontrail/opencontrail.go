@@ -303,7 +303,7 @@ func (p *Probe) OnNodeDeleted(n *graph.Node) {
 func (p *Probe) Start() {
 	p.Ctx.Graph.AddEventListener(p)
 	go p.nodeUpdater()
-	// go p.rtMonitor()
+	go p.rtMonitor()
 	// go p.tunnelUpdater()
 }
 
