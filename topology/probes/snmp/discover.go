@@ -154,7 +154,7 @@ func (p *Probe) topoFabricUpdater(respChan <-chan *lldpResponse) {
 }
 
 func (p *Probe) discoverFabricTopo() {
-	discovered := make(Set)
+	discovered := make(map[string]struct{})
 	respChan := make(chan *lldpResponse)
 	neighborChan := make(chan []string)
 	go p.topoFabricUpdater(respChan)
@@ -174,13 +174,17 @@ func (p *Probe) discoverFabricTopo() {
 			}(addr)
 		}
 		// Main goroutine wait and get data from all clients
-		var neighbors []string
+		var newAddrs []string
 		for i := 0; i < len(addrs); i++ {
-			// Pull the next message from channel
-			neighbors = append(neighbors, <-neighborChan...)
+			for _, addr := range <-neighborChan {
+				// Add addr to discovered addresses list
+				if _, ok := discovered[addr]; !ok {
+					newAddrs = append(newAddrs, addr)
+					discovered[addr] = struct{}{}
+				}
+			}
 		}
-		// Discover new chassises
-		addrs = discovered.Push(neighbors)
+		addrs = newAddrs
 	}
 	close(respChan)
 }
