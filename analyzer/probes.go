@@ -22,7 +22,6 @@ import (
 	"github.com/skydive-project/skydive/graffiti/graph"
 	"github.com/skydive-project/skydive/logging"
 	"github.com/skydive-project/skydive/probe"
-	"github.com/skydive-project/skydive/topology/probes/contrailservicechain"
 	"github.com/skydive-project/skydive/topology/probes/fabric"
 	"github.com/skydive-project/skydive/topology/probes/istio"
 	"github.com/skydive-project/skydive/topology/probes/k8s"
@@ -30,6 +29,7 @@ import (
 	"github.com/skydive-project/skydive/topology/probes/ovn"
 	"github.com/skydive-project/skydive/topology/probes/peering"
 	"github.com/skydive-project/skydive/topology/probes/snmp"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/sfc"
 )
 
 // NewTopologyProbeBundleFromConfig creates a new topology server probes from configuration
@@ -64,7 +64,7 @@ func NewTopologyProbeBundleFromConfig(g *graph.Graph) (*probe.Bundle, error) {
 		case "nsm":
 			handler, err = nsm.NewNsmProbe(g)
 		case "servicechain":
-			handler, err = contrailservicechain.NewProbe(g)
+			handler, err = sfc.NewProbe(g)
 		case "snmp":
 			community := config.GetString("analyzer.topology.snmp.community")
 			handler, err = snmp.NewProbe(g, community)

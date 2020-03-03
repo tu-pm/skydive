@@ -1,4 +1,4 @@
-package contrailservicechain
+package sfc
 
 import (
 	"github.com/skydive-project/skydive/graffiti/graph"

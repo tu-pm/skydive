@@ -1,4 +1,4 @@
-package contrailservicechain
+package sfc
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/skydive-project/skydive/probe"
 	"github.com/skydive-project/skydive/topology"
 	"github.com/skydive-project/skydive/topology/probes"
-	"github.com/skydive-project/skydive/topology/probes/contrailservicechain/types"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/sfc/types"
 )
 
 type sfcEvent func()

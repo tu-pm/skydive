@@ -1,11 +1,11 @@
-package contrailservicechain
+package sfc
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/skydive-project/skydive/graffiti/graph"
-	"github.com/skydive-project/skydive/topology/probes/contrailservicechain/types"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/sfc/types"
 )
 
 func commonMetadata(c types.CommonAttribute) graph.Metadata {

@@ -1,4 +1,4 @@
-package contrailservicechain
+package sfc
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"github.com/skydive-project/skydive/topology/probes/contrailservicechain/types"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/sfc/types"
 )
 
 type RestApiClient struct {
