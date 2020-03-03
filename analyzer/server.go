@@ -54,10 +54,10 @@ import (
 	"github.com/skydive-project/skydive/topology/probes/netlink"
 	"github.com/skydive-project/skydive/topology/probes/neutron"
 	"github.com/skydive-project/skydive/topology/probes/nsm"
-	"github.com/skydive-project/skydive/topology/probes/opencontrail"
 	"github.com/skydive-project/skydive/topology/probes/ovn"
 	"github.com/skydive-project/skydive/topology/probes/ovsdb"
 	"github.com/skydive-project/skydive/topology/probes/runc"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/vrouter"
 	"github.com/skydive-project/skydive/ui"
 	"github.com/skydive-project/skydive/websocket"
 	ws "github.com/skydive-project/skydive/websocket"
@@ -435,7 +435,7 @@ func init() {
 	graph.NodeMetadataDecoders["Libvirt"] = libvirt.MetadataDecoder
 	graph.NodeMetadataDecoders["OVN"] = ovn.MetadataDecoder
 	graph.NodeMetadataDecoders["Neutron"] = neutron.MetadataDecoder
-	graph.NodeMetadataDecoders["Contrail"] = opencontrail.MetadataDecoder
+	graph.NodeMetadataDecoders["Contrail"] = vrouter.MetadataDecoder
 
 	graph.EdgeMetadataDecoders["NSM"] = nsm.MetadataDecoder
 }

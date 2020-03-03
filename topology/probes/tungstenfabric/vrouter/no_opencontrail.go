@@ -17,7 +17,7 @@
  *
  */
 
-package opencontrail
+package vrouter
 
 import (
 	"github.com/skydive-project/skydive/common"

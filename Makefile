@@ -69,13 +69,13 @@ EASYJSON_FILES_TAG=\
 	topology/probes/netlink/metadata.go \
 	topology/probes/neutron/neutron.go \
 	topology/probes/nsm/nsm.go \
-	topology/probes/opencontrail/metadata.go \
+	topology/probes/tungstenfabric/vrouter/metadata.go \
 	topology/probes/ovn/ovn.go \
 	topology/probes/ovsdb/ovsdb.go \
 	topology/probes/runc/metadata.go \
 	topology/probes/socketinfo/connection.go
 EASYJSON_FILES_TAG_OPENCONTRAIL=\
-	topology/probes/opencontrail/routing_table.go
+	topology/probes/tungstenfabric/vrouter/routing_table.go
 VPPBINAPI_GITHUB:=git.fd.io/govpp.git/cmd/binapi-generator
 VERBOSE_FLAGS?=-v
 VERBOSE_TESTS_FLAGS?=-test.v
@@ -186,8 +186,8 @@ ifeq ($(WITH_HELM), true)
 endif
 
 ifeq ($(WITH_OPENCONTRAIL), true)
-  BUILD_TAGS+=opencontrail
-  AGENT_TEST_EXTRA_PROBES+=opencontrail
+  BUILD_TAGS+=tungstenfabric
+  AGENT_TEST_EXTRA_PROBES+=tungstenfabric
 ifeq ($(OS_RHEL),Y)
   STATIC_LIBS+=libxml2.a
 endif
@@ -306,8 +306,8 @@ GEN_EASYJSON_FILES_TAG_OPENCONTRAIL := $(patsubst %.go,%_easyjson.go,$(EASYJSON_
 flow/flow.pb_easyjson.go: flow/flow.pb.go
 	$(call VENDOR_RUN,${EASYJSON_GITHUB}) easyjson -all $<
 
-topology/probes/opencontrail/routing_table_easyjson.go: $(EASYJSON_FILES_TAG_OPENCONTRAIL)
-	$(call VENDOR_RUN,${EASYJSON_GITHUB}) easyjson -build_tags opencontrail $<
+topology/probes/tungstenfabric/vrouter/routing_table_easyjson.go: $(EASYJSON_FILES_TAG_OPENCONTRAIL)
+	$(call VENDOR_RUN,${EASYJSON_GITHUB}) easyjson -build_tags tungstenfabric $<
 
 .PHONY: .easyjson
 .easyjson: flow/flow.pb_easyjson.go $(GEN_EASYJSON_FILES_TAG) $(GEN_EASYJSON_FILES_TAG_OPENCONTRAIL)

@@ -17,7 +17,7 @@
  *
  */
 
-package opencontrail
+package vrouter
 
 import (
 	"context"

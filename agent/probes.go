@@ -32,10 +32,10 @@ import (
 	"github.com/skydive-project/skydive/topology/probes/netlink"
 	"github.com/skydive-project/skydive/topology/probes/netns"
 	"github.com/skydive-project/skydive/topology/probes/neutron"
-	"github.com/skydive-project/skydive/topology/probes/opencontrail"
 	"github.com/skydive-project/skydive/topology/probes/ovsdb"
 	"github.com/skydive-project/skydive/topology/probes/runc"
 	"github.com/skydive-project/skydive/topology/probes/socketinfo"
+	"github.com/skydive-project/skydive/topology/probes/tungstenfabric/vrouter"
 	"github.com/skydive-project/skydive/topology/probes/vpp"
 )
 
@@ -86,7 +86,7 @@ func NewTopologyProbeBundle(g *graph.Graph, hostNode *graph.Node) (*probe.Bundle
 		case "neutron":
 			handler, err = new(neutron.Probe).Init(ctx, bundle)
 		case "opencontrail":
-			handler, err = new(opencontrail.Probe).Init(ctx, bundle)
+			handler, err = new(vrouter.Probe).Init(ctx, bundle)
 		case "socketinfo":
 			handler, err = new(socketinfo.ProbeHandler).Init(ctx, bundle)
 		case "libvirt":

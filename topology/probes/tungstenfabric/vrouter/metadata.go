@@ -1,4 +1,4 @@
-//go:generate go run ../../../scripts/gendecoder.go -package github.com/skydive-project/skydive/topology/probes/opencontrail
+//go:generate go run ../../../../scripts/gendecoder.go -package github.com/skydive-project/skydive/topology/probes/tungstenfabric/vrouter
 
 /*
  * Copyright (C) 2019 Red Hat, Inc.
@@ -17,7 +17,7 @@
  *
  */
 
-package opencontrail
+package vrouter
 
 import (
 	json "encoding/json"
@@ -57,17 +57,6 @@ type Route struct {
 type RoutingTable struct {
 	InterfacesUUID []string
 	Routes         []*Route
-}
-
-// easyjson:json
-// gendecoder
-type NHTunnel struct {
-	VrfName       string `json:",omitempty"`
-	Prefix        string `json:",omitempty"`
-	SourceIP      string `json:",omitempty"`
-	DestinationIP string `json:",omitempty"`
-	TunnelType    string `json:",omitempty"`
-	Valid         bool   `json:",omitempty"`
 }
 
 // MetadataDecoder implements a json message raw decoder

@@ -32,7 +32,7 @@
 // routing tables are corrupted. Skydive agent then have to be
 // restarted when Contrail Vrouter agent is restarted.
 
-package opencontrail
+package vrouter
 
 import (
 	"bufio"
