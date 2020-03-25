@@ -67,7 +67,8 @@ func NewTopologyProbeBundleFromConfig(g *graph.Graph) (*probe.Bundle, error) {
 			handler, err = sfc.NewProbe(g)
 		case "snmp":
 			community := config.GetString("analyzer.topology.snmp.community")
-			handler, err = snmp.NewProbe(g, community)
+			interval := config.GetInt("analyzer.topology.snmp.interval")
+			handler, err = snmp.NewProbe(g, community, interval)
 		default:
 			logging.GetLogger().Errorf("unknown probe type: %s", t)
 			continue

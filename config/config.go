@@ -135,6 +135,8 @@ func init() {
 	cfg.SetDefault("analyzer.topology.k8s.config_file", "/etc/skydive/kubeconfig")
 	cfg.SetDefault("analyzer.topology.ovn.address", "unix:///var/run/openvswitch/ovnnb_db.sock")
 	cfg.SetDefault("analyzer.topology.istio.config_file", "/etc/skydive/kubeconfig")
+	cfg.SetDefault("analyzer.topology.snmp.community", "public")
+	cfg.SetDefault("analyzer.topology.snmp.interval", 10)
 
 	cfg.SetDefault("auth.basic.type", "basic") // defined for backward compatibility
 	cfg.SetDefault("auth.keystone.tenant_name", "admin")
