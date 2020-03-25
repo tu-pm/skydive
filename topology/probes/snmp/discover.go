@@ -73,11 +73,11 @@ func lldpRequest(target, community string) *lldpResponse {
 			// Bug type conversion error
 			locPortIDString, ok := (*locPort)["PortID"].(string)
 			if !ok {
-				panic(fmt.Sprintf("local port id type mismatch, locport=%+v", *locPort))
+				return fmt.Errorf("local port id type mismatch, locport=%+v", *locPort)
 			}
 			remPortIDString, ok := remPortID.(string)
 			if !ok {
-				panic(fmt.Sprintf("remote port id type mismatch, id=%+v, type=%T", remPortID, remPortID))
+				return fmt.Errorf("remote port id type mismatch, id=%+v, type=%T", remPortID, remPortID)
 			}
 			// If two switches are stacked together, each pair of stacked ports will have
 			// two port connecting to each other by a layer2 link. They then exchange
