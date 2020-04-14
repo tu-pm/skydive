@@ -67,6 +67,7 @@ type Probe struct {
 	state         common.ServiceState              // state of the probe (running or stopped)
 	wg            sync.WaitGroup                   // capture goroutines wait group
 	autoDiscovery bool                             // capture LLDP traffic on all capable interfaces
+	ignoreDCBX    bool                             // ignore dcbx packets
 }
 
 type ifreq struct {
@@ -176,6 +177,15 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		if lldpLayerInfo := packet.Layer(layers.LayerTypeLinkLayerDiscoveryInfo); lldpLayerInfo != nil {
 			lldpLayerInfo := lldpLayerInfo.(*layers.LinkLayerDiscoveryInfo)
+
+			// Stop early on DCBX packets if ignoreDCBX equals true
+			if p.ignoreDCBX {
+				for _, tlv := range lldpLayerInfo.OrgTLVs {
+					if tlv.OUI == layers.IEEEOUIDCBX {
+						return
+					}
+				}
+			}
 
 			if portIDSubtype := lldpLayer.PortID.Subtype; portIDSubtype == layers.LLDPPortIDSubtypeIfaceName {
 				portMetadata["Name"] = bytesToString(lldpLayer.PortID.ID)
@@ -478,6 +488,7 @@ func (p *Probe) Init(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error
 	p.interfaceMap = interfaceMap
 	p.state = common.StoppedState
 	p.autoDiscovery = len(interfaces) == 0
+	p.ignoreDCBX = ctx.Config.GetBool("agent.topology.lldp.ignore_dcbx")
 
 	return p, nil
 }
