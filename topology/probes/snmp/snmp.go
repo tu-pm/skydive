@@ -33,11 +33,15 @@ func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 }
 
 // NewProbe initializes a new SNMP probe
-func NewProbe(g *graph.Graph, community string, interval int) (probe.Handler, error) {
+func NewProbe(g *graph.Graph, community, interval string) (probe.Handler, error) {
 	p := &Probe{
 		graph:      g,
 		community:  community,
 		lastUpdate: time.Now().UTC(),
 	}
-	return probes.NewProbeWrapperWithDuration(p, interval), nil
+	duration, err := time.ParseDuration(interval)
+	if err != nil {
+		return nil, err
+	}
+	return probes.NewProbeWrapperWithDuration(p, duration), nil
 }
