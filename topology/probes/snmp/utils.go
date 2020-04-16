@@ -6,19 +6,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/skydive-project/skydive/topology/probes/lldp"
+
+	"github.com/google/gopacket/layers"
+
 	"github.com/pkg/errors"
 	"github.com/skydive-project/skydive/graffiti/graph"
-	"github.com/skydive-project/skydive/logging"
-	"github.com/skydive-project/skydive/topology/probes/lldp"
 )
-
-func (p *Probe) createNode(id graph.Identifier, m graph.Metadata) *graph.Node {
-	node, err := p.graph.NewNode(id, m)
-	if err != nil {
-		logging.GetLogger().Error(err)
-	}
-	return node
-}
 
 func (p *Probe) updateMetadata(node *graph.Node, m graph.Metadata) {
 	tr := p.graph.StartMetadataTransaction(node)
@@ -28,74 +22,63 @@ func (p *Probe) updateMetadata(node *graph.Node, m graph.Metadata) {
 	tr.Commit()
 }
 
+// Generate switch id
+func genSwitchID(info *LLDPMetadata) (graph.Identifier, error) {
+	if ip := net.ParseIP(info.MgmtAddress); ip == nil {
+		return "", fmt.Errorf("Switch %s doesn't have an IP management address", info.SysName)
+	}
+	// Generate ChassisID from its metadata
+	return graph.GenID(info.SysName, "SysName", info.MgmtAddress, "MgmtAddress"), nil
+}
+
 // Generate switch metadata
-func genSwitchMetadata(m *Payload) graph.Metadata {
-	lldpInfo := &lldp.Metadata{}
-	m.InitStruct(lldpInfo)
-	return graph.Metadata{
-		"LLDP":      lldpInfo,
-		"Name":      lldpInfo.SysName,
+func genSwitchMetadata(m *LLDPMetadata) (id graph.Identifier, metadata graph.Metadata, err error) {
+	// Generate ID
+	id, err = genSwitchID(m)
+	if err != nil {
+		return
+	}
+	metadata = graph.Metadata{
+		"LLDP":      (*lldp.Metadata)(m),
+		"Name":      m.SysName,
 		"Probe":     "lldp",
 		"SNMPState": "UP",
 		"Type":      "switch",
 	}
-}
-
-// Generate port metadata
-func genPortMetadata(m *Payload) graph.Metadata {
-	lldpInfo := &lldp.Metadata{}
-	m.InitStruct(lldpInfo)
-	if lldpInfo.PortIDType != "Interface Name" {
-		panic(fmt.Sprintf("Failed to create port %+v: PortIDType must be Interface Name", *m))
-	}
-	return graph.Metadata{
-		"LLDP":  lldpInfo,
-		"Name":  lldpInfo.PortID,
-		"Probe": "lldp",
-		"Type":  "switchport",
-	}
-}
-
-// Generate switch id
-func genSwitchID(m *Payload) graph.Identifier {
-	if len((*m)["MgmtAddress"].(string)) == 0 {
-		panic(fmt.Sprintf("Switch %+v doesn't have a management address", *m))
-	}
-	mgmtAddress, ok := (*m)["MgmtAddress"].(string)
-	if !ok {
-		panic(fmt.Sprintf("Switch %+v mgmt address is not a string", *m))
-	}
-	// Fix bug: http://10.240.203.2:8180/sdn/know-how/issues/133#note_96745
-	var sysName string
-	switch v := (*m)["SysName"].(type) {
-	case string:
-		sysName = v
-	case uint64:
-		sysName = strconv.FormatUint(v, 10)
-	default:
-		panic(fmt.Sprintf("Switch %+v unexpected type %T", *m, v))
-	}
-	// Generate ChassisID from its metadata
-	return graph.GenID(sysName, "SysName", mgmtAddress, "MgmtAddress")
+	return
 }
 
 // Generate port id
-func genPortID(switchID string, port *Payload) graph.Identifier {
-	portID, ok := (*port)["PortID"].(string)
-	if !ok {
-		panic(fmt.Sprintf("Port %+v ID is not a string", *port))
+func genPortID(swID graph.Identifier, port *LLDPMetadata) (graph.Identifier, error) {
+	return graph.GenID(string(swID), port.PortID, port.PortIDType), nil
+}
+
+// Generate port metadata
+func genPortMetadata(swID graph.Identifier, m *LLDPMetadata) (id graph.Identifier, metadata graph.Metadata, err error) {
+	// Generate ID
+	id, err = genPortID(swID, m)
+	if err != nil {
+		return
 	}
-	portIDType, ok := (*port)["PortIDType"].(string)
-	if !ok {
-		panic(fmt.Sprintf("Port %+v ID Type is not a string", *port))
+	name := m.PortID
+	// Use port description if port id is not interface name
+	if ifstr := layers.LLDPPortIDSubtypeIfaceName; m.PortIDType != ifstr.String() {
+		name = m.Description
 	}
-	return graph.GenID(switchID, portID, portIDType)
+	metadata = graph.Metadata{
+		"LLDP":  (*lldp.Metadata)(m),
+		"Name":  name,
+		"Probe": "lldp",
+		"Type":  "switchport",
+	}
+	return
 }
 
 // Get list of management addresses
 func (p *Probe) mgmtAddrs(reachableOnly bool) (addrs []string) {
 	p.graph.RLock()
 	switches := p.graph.GetNodes(graph.Metadata{"Type": "switch"})
+	p.graph.RUnlock()
 	for _, sw := range switches {
 		snmpState, _ := sw.GetFieldString("SNMPState")
 		if reachableOnly == true && snmpState == "DOWN" {
@@ -107,7 +90,6 @@ func (p *Probe) mgmtAddrs(reachableOnly bool) (addrs []string) {
 		}
 		addrs = append(addrs, addr)
 	}
-	p.graph.RUnlock()
 	return
 }
 
@@ -132,7 +114,7 @@ func getIfIndex(oid string) (locIfIndex int, err error) {
 // Generate local port's absolute OIDs from index
 func genLocPortOIDs(portIndex int) map[string]string {
 	oids := make(map[string]string)
-	for k, v := range LldpLocalPortOIDsMinimum {
+	for k, v := range LldpLocalPortOIDs {
 		oids[k] = fmt.Sprintf("%s.%d", v, portIndex)
 	}
 	return oids

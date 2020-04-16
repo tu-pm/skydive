@@ -73,8 +73,7 @@ func (c *Client) Get(oid string) (result interface{}, err error) {
 }
 
 // GetMany takes a map of oids and return the result of snmpget command in a map
-func (c *Client) GetMany(oids map[string]string) (result *Payload, err error) {
-	result = &Payload{}
+func (c *Client) GetMany(oids map[string]string, result Metadata) (err error) {
 	oidLabels, oidStrings := []string{}, []string{}
 	for label, oid := range oids {
 		oidLabels = append(oidLabels, label)
@@ -91,7 +90,10 @@ func (c *Client) GetMany(oids map[string]string) (result *Payload, err error) {
 		return
 	}
 	for i, label := range oidLabels {
-		result.SetValue(label, values[i])
+		if err = result.Set(label, values[i]); err != nil {
+			err = errors.Wrapf(err, "SnmpGet setting fields error")
+			return
+		}
 	}
 	return
 }
@@ -115,9 +117,8 @@ func (c *Client) GetNext(oid string) (nextOID string, result interface{}, err er
 }
 
 // GetNextMany takes a map of oids and return the result of snmpgetnext command in a map
-func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string, result *Payload, err error) {
+func (c *Client) GetNextMany(oids map[string]string, result Metadata) (nextOIDs map[string]string, err error) {
 	nextOIDs = make(map[string]string)
-	result = &Payload{}
 	oidStrings := []string{}
 	oidLabels, oidStrings := []string{}, []string{}
 	for label, oid := range oids {
@@ -136,7 +137,10 @@ func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string
 	}
 	for i, label := range oidLabels {
 		nextOIDs[label] = pkt.Variables[i].Name
-		result.SetValue(label, values[i])
+		if err = result.Set(label, values[i]); err != nil {
+			err = errors.Wrapf(err, "SnmpGetNext setting fields error")
+			return
+		}
 	}
 	return
 }
@@ -144,19 +148,7 @@ func (c *Client) GetNextMany(oids map[string]string) (nextOIDs map[string]string
 func (c *Client) getPDUValue(pdu gosnmp.SnmpPDU) (interface{}, error) {
 	switch pdu.Type {
 	case gosnmp.OctetString:
-		pVal := pdu.Value.([]byte)
-		// Some MAC Addresses are encoded differently
-		if (strings.Contains(pdu.Name, ".1.0.8802.1.1.2.1.4.1.1.7") ||
-			strings.Contains(pdu.Name, ".1.3.6.1.2.1.2.2.1.6") ||
-			strings.Contains(pdu.Name, ".1.0.8802.1.1.2.1.3.2.0")) &&
-			len(pVal) == 6 {
-			var hex []string
-			for _, v := range pVal {
-				hex = append(hex, fmt.Sprintf("%02x", v))
-			}
-			return strings.Join(hex, ":"), nil
-		}
-		return string(pVal), nil
+		return decodeMACTest(pdu.Name, pdu.Value.([]byte)), nil
 	case gosnmp.NoSuchObject:
 		return nil, errors.New(
 			fmt.Sprintf("OID %s doesn't exist at target %s", pdu.Name, c.gosnmp.Target),
@@ -164,6 +156,23 @@ func (c *Client) getPDUValue(pdu gosnmp.SnmpPDU) (interface{}, error) {
 	default:
 		return toInt64(pdu.Value), nil
 	}
+}
+
+// Sometimes MAC addresses are encoded differently, typically when working with the lldpd tool
+// got: [XX XX XX XX XX XX]
+// want: "XX:XX:XX:XX:XX:XX"
+func decodeMACTest(name string, val []byte) string {
+	if len(val) == 6 && (strings.Contains(name, ".1.0.8802.1.1.2.1.4.1.1.7") ||
+		strings.Contains(name, ".1.3.6.1.2.1.2.2.1.6") ||
+		strings.Contains(name, ".1.0.8802.1.1.2.1.3.2.0") ||
+		strings.Contains(name, ".1.0.8802.1.1.2.1.3.7.1.3")) {
+		var hex []string
+		for _, v := range val {
+			hex = append(hex, fmt.Sprintf("%02x", v))
+		}
+		return strings.Join(hex, ":")
+	}
+	return string(val)
 }
 
 func (c *Client) getPDUValues(pdus []gosnmp.SnmpPDU) ([]interface{}, error) {

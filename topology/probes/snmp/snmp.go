@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/skydive-project/skydive/logging"
+
 	"github.com/skydive-project/skydive/graffiti/graph"
 	"github.com/skydive-project/skydive/probe"
 	"github.com/skydive-project/skydive/topology/probes"
@@ -21,7 +23,9 @@ type Probe struct {
 func (p *Probe) Do(ctx context.Context, wg *sync.WaitGroup) error {
 	wg.Add(1)
 	go func() {
+		logging.GetLogger().Debug("Discovering topology...")
 		p.discoverFabricTopo()
+		logging.GetLogger().Debug("Updating ports...")
 		p.updatePortStats()
 		wg.Done()
 	}()
