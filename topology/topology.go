@@ -189,3 +189,23 @@ func IsInterfaceUp(node *graph.Node) bool {
 	}
 	return false
 }
+
+func GetFirstEdge(g *graph.Graph, node *graph.Node, em graph.ElementMatcher) *graph.Edge {
+	edges := g.GetNodeEdges(node, em)
+	if len(edges) == 0 {
+		return nil
+	}
+	return edges[0]
+}
+
+func GetPeer(g *graph.Graph, node *graph.Node, edge *graph.Edge, f graph.ElementMatcher) *graph.Node {
+	peerID := edge.Parent
+	if node.ID == edge.Parent {
+		peerID = edge.Child
+	}
+	peer := g.GetNode(peerID)
+	if peer != nil && !peer.MatchMetadata(f) {
+		return nil
+	}
+	return peer
+}
