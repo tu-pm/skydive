@@ -124,6 +124,8 @@ func init() {
 	cfg.SetDefault("agent.topology.socketinfo.host_update", 10)
 	cfg.SetDefault("agent.topology.vpp.connect", "")
 	cfg.SetDefault("agent.topology.lldp.ignore_dcbx", true)
+	cfg.SetDefault("agent.topology.lldp.interval", "5m")
+	cfg.SetDefault("agent.topology.lldp.timeout", "10m")
 
 	cfg.SetDefault("analyzer.auth.cluster.backend", "noauth")
 	cfg.SetDefault("analyzer.auth.api.backend", "noauth")

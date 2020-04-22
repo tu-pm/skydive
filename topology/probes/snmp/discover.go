@@ -2,6 +2,7 @@ package snmp
 
 import (
 	"fmt"
+	"github.com/skydive-project/skydive/topology/probes/lldp"
 
 	"github.com/pkg/errors"
 	"github.com/skydive-project/skydive/graffiti/graph"
@@ -100,9 +101,38 @@ func (p *Probe) updateSubGraph(resp *lldpResponse) {
 	swNode := p.graph.LookupFirstNode(graph.Metadata{"LLDP.MgmtAddress": resp.address, "Type": "switch"})
 	// Unable to request lldp information from switch
 	if resp.err != nil {
-		logging.GetLogger().Errorf("Failed to fetch lldp information from switch %s: %v", resp.address, resp.err)
-		if swNode != nil {
-			p.graph.AddMetadata(swNode, "SNMPState", "DOWN")
+		if swNode == nil {
+			logging.GetLogger().Debugf("Failed to fetch lldp information from address %s: %v", resp.address, resp.err)
+			return
+		}
+		logging.GetLogger().Errorf("SNMP disconnected from switch %s: %v", resp.address, resp.err)
+		p.graph.AddMetadata(swNode, "State", lldp.SwitchInaccessible)
+		isDown := true
+		for _, port := range p.graph.LookupChildren(swNode, graph.Metadata{"Type": "switchport"}, nil) {
+			// If port doesn't have an ACTIVE link, continue
+			edge := topology.GetFirstEdge(p.graph, port, graph.Metadata{"RelationType": "layer2", "State": lldp.LinkActive})
+			if edge == nil {
+				continue
+			}
+			// If port connects to another switch, and that switch is not accessible, continue
+			remPort := topology.GetPeer(p.graph, port, edge, graph.Metadata{"Type": "switchport"})
+			if remPort != nil {
+				remSwitch := p.graph.LookupParents(remPort, graph.Metadata{"Type": "switch"}, topology.OwnershipMetadata())
+				if len(remSwitch) > 0 {
+					if state, _ := remSwitch[0].GetFieldString("State"); state != lldp.SwitchUP {
+						continue
+					}
+				}
+			}
+			// Port still has an active link connecting to an accessible switch => switch is not down yet
+			isDown = false
+			break
+		}
+		if isDown {
+			p.graph.AddMetadata(swNode, "State", lldp.SwitchDOWN)
+			for _, port := range p.graph.LookupChildren(swNode, nil, topology.OwnershipMetadata()) {
+				p.graph.AddMetadata(port, "State", "DOWN")
+			}
 		}
 		return
 	}
@@ -133,7 +163,7 @@ func (p *Probe) updateSubGraph(resp *lldpResponse) {
 		}
 		// Create or update port
 		if locPort == nil {
-			locPort, _ = p.graph.NewNode(pID, pMeta)
+			locPort, err = p.graph.NewNode(pID, pMeta)
 			if err != nil {
 				if err != graph.ErrNodeConflict {
 					err = errors.Wrapf(err, "Create port node %s failed", pID)
@@ -148,21 +178,52 @@ func (p *Probe) updateSubGraph(resp *lldpResponse) {
 		if !topology.HaveOwnershipLink(p.graph, swNode, locPort) {
 			topology.AddOwnershipLink(p.graph, swNode, locPort, nil)
 		}
-		remPortID := resp.links[portID].remPort
-		// If local port is currently linked to a different remote port => delete that link
-		if curRemport := p.graph.LookupFirstChild(locPort, topology.Layer2Metadata()); curRemport != nil {
-			if curRemPortID, _ := curRemport.GetFieldString("LLDP.PortID"); curRemPortID != remPortID {
-				p.graph.Unlink(locPort, curRemport)
+		remSwitch := p.graph.LookupFirstNode(graph.Metadata{
+			"Type":             "switch",
+			"LLDP.MgmtAddress": resp.links[portID].remAddr,
+		})
+		if remSwitch == nil {
+			continue
+		}
+		remPort := p.graph.LookupFirstChild(remSwitch, graph.Metadata{
+			"Type":        "switchport",
+			"LLDP.PortID": resp.links[portID].remPort,
+		})
+		if remPort == nil {
+			continue
+		}
+		l2Link := topology.GetFirstEdge(p.graph, locPort, topology.Layer2Metadata())
+		if l2Link != nil {
+			curRemPort := topology.GetPeer(p.graph, locPort, l2Link, nil)
+			if curRemPort != nil && curRemPort.ID != remPort.ID {
+				p.graph.Unlink(locPort, curRemPort)
+				l2Link = nil
 			}
 		}
-		// Link local port to remote port if presented
-		remPort := p.graph.LookupFirstNode(graph.Metadata{
-			"Type":        "switchport",
-			"LLDP.PortID": remPortID,
-		})
-		if remPort != nil && !topology.HaveLayer2Link(p.graph, remPort, locPort) {
-			topology.AddLayer2Link(p.graph, remPort, locPort, nil)
+		if l2Link == nil {
+			topology.AddLayer2Link(p.graph, remPort, locPort, graph.Metadata{"State": lldp.LinkActive})
+		} else {
+			p.graph.AddMetadata(l2Link, "State", lldp.LinkActive)
 		}
+	}
+	for _, portNode := range p.graph.LookupChildren(swNode, graph.Metadata{"Type": "switchport"}, nil) {
+		// Ignore if LLDP.PortID is reported in lldp response
+		id, _ := portNode.GetFieldString("LLDP.PortID")
+		if _, ok := resp.ports[id]; ok {
+			continue
+		}
+		// Ignore if port doesn't have a layer2 link
+		link := topology.GetFirstEdge(p.graph, portNode, topology.Layer2Metadata())
+		if link == nil {
+			continue
+		}
+		// Ignore if remote port doesn't belong to a switch
+		remPort := topology.GetPeer(p.graph, portNode, link, graph.Metadata{"Type": "switchport"})
+		if remPort == nil {
+			continue
+		}
+		// Set l2 link to INACTIVE
+		p.graph.AddMetadata(link, "State", lldp.LinkInactive)
 	}
 }
 

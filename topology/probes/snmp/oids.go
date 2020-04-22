@@ -29,7 +29,7 @@ var LldpRemoteChassisMgmtAddressOID = ".1.0.8802.1.1.2.1.4.2.1.4"
 var IfNameOID = "1.3.6.1.2.1.31.1.1.1.1"
 
 // IfDescrOID store system's port descriptions
-var IfDescrOID = "1.3.6.1.2.1.31.1.1.1.1"
+var IfDescrOID = "1.3.6.1.2.1.2.2.1.2"
 
 // IfMetricOIDs store system's port metrics
 var IfMetricOIDs = map[string]string{

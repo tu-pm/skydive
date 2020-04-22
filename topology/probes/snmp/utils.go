@@ -39,11 +39,11 @@ func genSwitchMetadata(m *LLDPMetadata) (id graph.Identifier, metadata graph.Met
 		return
 	}
 	metadata = graph.Metadata{
-		"LLDP":      (*lldp.Metadata)(m),
-		"Name":      m.SysName,
-		"Probe":     "lldp",
-		"SNMPState": "UP",
-		"Type":      "switch",
+		"LLDP":  (*lldp.Metadata)(m),
+		"Name":  m.SysName,
+		"Probe": "lldp",
+		"State": lldp.SwitchUP,
+		"Type":  "switch",
 	}
 	return
 }
@@ -80,8 +80,8 @@ func (p *Probe) mgmtAddrs(reachableOnly bool) (addrs []string) {
 	switches := p.graph.GetNodes(graph.Metadata{"Type": "switch"})
 	p.graph.RUnlock()
 	for _, sw := range switches {
-		snmpState, _ := sw.GetFieldString("SNMPState")
-		if reachableOnly == true && snmpState == "DOWN" {
+		state, _ := sw.GetFieldString("State")
+		if reachableOnly == true && state != "UP" {
 			continue
 		}
 		addr, err := sw.GetFieldString("LLDP.MgmtAddress")

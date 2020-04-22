@@ -132,12 +132,10 @@ func (p *Probe) portStatsUpdater(resp *ifResponse, now time.Time) {
 				break
 			}
 		}
-		if len(key) == 0 {
-			p.graph.DelNode(portNode)
-			continue
+		if len(key) != 0 {
+			p.updateMetadata(portNode, graph.Metadata(resp.configs[key]))
+			p.updateMetadata(portNode, genMetrics(portNode, resp.metrics[key], now, p.lastUpdate))
 		}
-		p.updateMetadata(portNode, graph.Metadata(resp.configs[key]))
-		p.updateMetadata(portNode, genMetrics(portNode, resp.metrics[key], now, p.lastUpdate))
 	}
 }
 
