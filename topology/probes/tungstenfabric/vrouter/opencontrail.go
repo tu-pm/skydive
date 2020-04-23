@@ -146,36 +146,30 @@ func getVrfIdFromIntrospect(host string, port int, vrfName string) (vrfId int, e
 func (p *Probe) onVhostAdded(node *graph.Node, itf collection.Element) {
 	p.vHost = node
 
-	// Link physical interface to vhost if presents
-	phyItf, _ := itf.GetField("physical_interface")
-	if phyItf != "" {
-		m := graph.Metadata{"Name": phyItf}
-		nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
-		switch {
-		case len(nodes) == 0:
-			p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
-			return
-		case len(nodes) > 1:
-			p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
-			return
-		}
-
-		p.linkToVhost(nodes[0])
-		p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
+	// Link parent interface to vhost if presents
+	parent, _ := itf.GetField("parent_interface")
+	if nodes := p.Ctx.Graph.LookupChildren(
+		p.Ctx.RootNode,
+		graph.Metadata{"Name": parent},
+		graph.Metadata{"RelationType": "ownership"},
+	); len(nodes) > 0 {
+		p.linkToVhost(nodes[0], graph.Metadata{"Tag": "vhost-to-parent"})
+		// TODO: Add support for MPLS and VXLAN flow probes running on vhost
+		//p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
 	}
 
 	// Link pending links to vhost
 	for _, n := range p.pendingLinks {
-		p.linkToVhost(n)
+		p.linkToVhost(n, nil)
 	}
 	p.pendingLinks = p.pendingLinks[:0]
 }
 
-func (p *Probe) linkToVhost(node *graph.Node) {
+func (p *Probe) linkToVhost(node *graph.Node, m graph.Metadata) {
 	if p.vHost != nil {
 		if !topology.HaveLayer2Link(p.Ctx.Graph, node, p.vHost) {
 			p.Ctx.Logger.Debugf("Link %s to %s", node.String(), p.vHost.String())
-			topology.AddLayer2Link(p.Ctx.Graph, node, p.vHost, nil)
+			topology.AddLayer2Link(p.Ctx.Graph, node, p.vHost, m)
 		}
 	} else {
 		p.Ctx.Logger.Debugf("Add node %s to pending link list", node.String())
@@ -231,7 +225,7 @@ func (p *Probe) nodeUpdater() {
 			}
 			p.vrfs[extIDs.VRF] = struct{}{}
 			p.updateNode(node, extIDs)
-			p.linkToVhost(node)
+			p.linkToVhost(node, nil)
 
 			p.OnInterfaceAdded(int(extIDs.VRFID), extIDs.UUID)
 		}

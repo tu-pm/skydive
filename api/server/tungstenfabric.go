@@ -44,11 +44,106 @@ type Link struct {
 	Metadata graph.Metadata
 }
 
-func getHostNode(g *graph.Graph, n *graph.Node) *graph.Node {
-	return g.LookupParents(n, graph.Metadata{"Type": "host"}, topology.OwnershipMetadata())[0]
+// Path represents a path between two nodes
+type Path struct {
+	links []Link
+	err   error
 }
 
-func commonPrefixLength(x, y string, mask int) (cpl int, err error) {
+func (p *Path) connect(node1, node2 *graph.Node, metadata graph.Metadata) {
+	if node1 == nil || node2 == nil || node1.ID == node2.ID {
+		return
+	}
+	metadata["Type"] = "overlay-flow"
+	link := Link{
+		Parent:   string(node1.ID),
+		Child:    string(node2.ID),
+		Metadata: metadata,
+	}
+	p.links = append(p.links, link)
+}
+
+type chassis struct {
+	node  *graph.Node
+	ports []*graph.Node
+}
+
+func vhostToSwitch(g *graph.Graph, vhost *graph.Node) (sw chassis) {
+	// Get link from vhost to its parent interface
+	link := topology.GetFirstEdge(g, vhost, graph.Metadata{"Tag": "vhost-to-parent"})
+	if link == nil {
+		return
+	}
+	// Get vhost's parent interface
+	parent := topology.GetPeer(g, vhost, link, nil)
+	// If parent is vlan interface, get its physical interface
+	link = topology.GetFirstEdge(g, parent, graph.Metadata{"Type": "vlan"})
+	if link != nil {
+		parent = topology.GetPeer(g, vhost, link, nil)
+	}
+	var ifaces []*graph.Node
+	if driver, _ := parent.GetFieldString("Driver"); driver == "bonding" {
+		for _, link := range g.GetNodeEdges(parent, topology.Layer2Metadata()) {
+			if iface := topology.GetPeer(g, parent, link, nil); iface != nil {
+				ifaces = append(ifaces, iface)
+			}
+		}
+
+	} else {
+		ifaces = append(ifaces, parent)
+	}
+	// Get switch's ports corresponding to host's interfaces
+	for _, itf := range ifaces {
+		var swPort *graph.Node
+		for _, link = range g.GetNodeEdges(itf, topology.Layer2Metadata()) {
+			if swPort = topology.GetPeer(g, itf, link, graph.Metadata{"Type": "switchport"}); swPort != nil {
+				break
+			}
+		}
+		if swPort != nil {
+			sw.ports = append(sw.ports, swPort)
+			if sw.node == nil {
+				sw.node = g.LookupParents(swPort, graph.Metadata{"Type": "switch"}, topology.OwnershipMetadata())[0]
+			}
+		}
+	}
+	return
+}
+
+func connectVhosts(p *Path, g *graph.Graph, srcVhost, destVhost *graph.Node, metadata graph.Metadata) {
+	var (
+		srcHost    = g.LookupParents(srcVhost, nil, topology.OwnershipMetadata())[0]
+		destHost   = g.LookupParents(destVhost, nil, topology.OwnershipMetadata())[0]
+		srcSwitch  = vhostToSwitch(g, srcVhost)
+		destSwitch = vhostToSwitch(g, destVhost)
+	)
+	if srcSwitch.node == nil || destSwitch.node == nil {
+		p.connect(srcHost, destHost, metadata)
+		return
+	}
+
+	p.connect(srcVhost, srcHost, metadata)
+	for _, port := range srcSwitch.ports {
+		p.connect(srcHost, port, metadata)
+	}
+
+	// Connect underlay topology
+	if srcSwitch.node.ID != destSwitch.node.ID {
+		p.connectSwitches(g, srcSwitch.node, destSwitch.node, "", "")
+	}
+
+	for _, port := range destSwitch.ports {
+		p.connect(port, destHost, metadata)
+	}
+	p.connect(destHost, destVhost, metadata)
+}
+
+func (p *Path) connectSwitches(g *graph.Graph, srcSw, destSw *graph.Node, srcAddr, destAddr string) {
+	// TODO: Find an active flow between two addresses travelling through srcSw and destSw
+	return
+}
+
+func compareIP(x, y string, mask int) (cpl int, err error) {
 	ipx := net.ParseIP(x)
 	if ipx == nil {
 		return -1, fmt.Errorf("invalid lookup address: %s", x)
@@ -105,7 +200,7 @@ func lookupL2NH(vrIP, vrfName, mac string) (nh *NH, err error) {
 	return
 }
 
-func lookupUcNH(vrIP, vrfName, path string) (nh *NH, err error) {
+func lookupUcNH(vrIP, vrfName, ip string) (*NH, error) {
 	// Load Route collection from vrouter's introspect API
 	col, _ := collection.LoadCollection(
 		descriptions.UcRoute(),
@@ -119,34 +214,35 @@ func lookupUcNH(vrIP, vrfName, path string) (nh *NH, err error) {
 	}, "", "")
 
 	// Get the longest matching entry in routing table
-	mlen := -1
-	var matched collection.Element
+	var (
+		matchElem collection.Element
+		maxLen    = -1
+	)
 	for _, elem := range elems {
-		addr, _ := elem.GetField("src_ip")
-		plenString, _ := elem.GetField("src_plen")
-		plen, _ := strconv.Atoi(plenString)
-		cpl, _ := commonPrefixLength(path, addr, plen)
-		if cpl > mlen {
-			mlen = cpl
-			matched = elem
-		}
-		if cpl == 32 {
-			break
+		srcIp, _ := elem.GetField("src_ip")
+		srcPlen, _ := elem.GetField("src_plen")
+		prefLen, _ := strconv.Atoi(srcPlen)
+		matchLen, _ := compareIP(ip, srcIp, prefLen)
+		if matchLen > maxLen {
+			maxLen = matchLen
+			matchElem = elem
 		}
 	}
-	if mlen == -1 {
-		return nil, fmt.Errorf("Route not found, vrouter: %s, vrf: %s, lookup: %s", vrIP, vrfName, path)
+	if maxLen == -1 {
+		return nil, fmt.Errorf("Route not found, vrouter: %s, vrf: %s, lookup: %s", vrIP, vrfName, ip)
 	}
-	nhType, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
-	vrf, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
-	sourceIP, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
-	destIP, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
-	itf, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
-	tunType, _ := matched.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/tunnel_type")
-	label, _ := matched.GetField("path_list/list/PathSandeshData[1]/label")
-	vni, _ := matched.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
+	var (
+		nhType, _   = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
+		vrf, _      = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
+		sourceIP, _ = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
+		destIP, _   = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
+		itf, _      = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
+		tunType, _  = matchElem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/tunnel_type")
+		label, _    = matchElem.GetField("path_list/list/PathSandeshData[1]/label")
+		vni, _      = matchElem.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
+	)
 
-	nh = &NH{
+	return &NH{
 		VrouterIP: vrIP,
 		Type:      nhType,
 		Vrf:       vrf,
@@ -156,8 +252,7 @@ func lookupUcNH(vrIP, vrfName, path string) (nh *NH, err error) {
 		TunType:   tunType,
 		Label:     label,
 		VNI:       vni,
-	}
-	return
+	}, nil
 }
 
 func lookupVxlanNH(vrIP string, vxlanID string) (*NH, error) {
@@ -170,12 +265,14 @@ func lookupVxlanNH(vrIP string, vxlanID string) (*NH, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Route not found, vrouter: %s, vxlanID: %s", vrIP, vxlanID)
 	}
-	nhType, _ := elem.GetField("nh/NhSandeshData/type")
-	vrf, _ := elem.GetField("nh/NhSandeshData/vrf")
-	sourceIP, _ := elem.GetField("nh/NhSandeshData/sip")
-	destIP, _ := elem.GetField("nh/NhSandeshData/dip")
-	itf, _ := elem.GetField("nh/NhSandeshData/itf")
-	tunType, _ := elem.GetField("nh/NhSandeshData/tunnel_type")
+	var (
+		nhType, _   = elem.GetField("nh/NhSandeshData/type")
+		vrf, _      = elem.GetField("nh/NhSandeshData/vrf")
+		sourceIP, _ = elem.GetField("nh/NhSandeshData/sip")
+		destIP, _   = elem.GetField("nh/NhSandeshData/dip")
+		itf, _      = elem.GetField("nh/NhSandeshData/itf")
+		tunType, _  = elem.GetField("nh/NhSandeshData/tunnel_type")
+	)
 	return &NH{
 		VrouterIP: vrIP,
 		Type:      nhType,
@@ -188,7 +285,7 @@ func lookupVxlanNH(vrIP string, vxlanID string) (*NH, error) {
 	}, nil
 }
 
-func lookupMplsNH(vrIP string, label string) (nh *NH, err error) {
+func lookupMplsNH(vrIP string, label string) (*NH, error) {
 	col, _ := collection.LoadCollection(
 		descriptions.Mpls(),
 		[]string{fmt.Sprintf("%s:%d", vrIP, 8085)},
@@ -198,12 +295,14 @@ func lookupMplsNH(vrIP string, label string) (nh *NH, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("Route not found, vrouter: %s, mpls label: %s", vrIP, label)
 	}
-	nhType, _ := elem.GetField("nh/NhSandeshData/type")
-	vrf, _ := elem.GetField("nh/NhSandeshData/vrf")
-	sourceIP, _ := elem.GetField("nh/NhSandeshData/sip")
-	destIP, _ := elem.GetField("nh/NhSandeshData/dip")
-	itf, _ := elem.GetField("nh/NhSandeshData/itf")
-	tunType, _ := elem.GetField("nh/NhSandeshData/tunnel_type")
+	var (
+		nhType, _   = elem.GetField("nh/NhSandeshData/type")
+		vrf, _      = elem.GetField("nh/NhSandeshData/vrf")
+		sourceIP, _ = elem.GetField("nh/NhSandeshData/sip")
+		destIP, _   = elem.GetField("nh/NhSandeshData/dip")
+		itf, _      = elem.GetField("nh/NhSandeshData/itf")
+		tunType, _  = elem.GetField("nh/NhSandeshData/tunnel_type")
+	)
 	return &NH{
 		VrouterIP: vrIP,
 		Type:      nhType,
@@ -214,6 +313,32 @@ func lookupMplsNH(vrIP string, label string) (nh *NH, err error) {
 		TunType:   tunType,
 		Label:     label,
 	}, nil
+}
+
+func getTapFromIP(g *graph.Graph, ip string) (tap *graph.Node) {
+	for _, node := range g.GetNodes(graph.Metadata{"Type": "tun"}) {
+		cidrs, _ := node.GetFieldStringList("Neutron.IPV4")
+		for _, cidr := range cidrs {
+			tapIP := strings.Split(cidr, "/")[0]
+			if ip == tapIP {
+				return node
+			}
+		}
+	}
+	return nil
+}
+
+func getVhostFromIP(g *graph.Graph, ip string) (vhost *graph.Node) {
+	for _, node := range g.GetNodes(graph.Metadata{"Type": "vhost"}) {
+		cidrs, _ := node.GetFieldStringList("IPV4")
+		for _, cidr := range cidrs {
+			vhostIP := strings.Split(cidr, "/")[0]
+			if ip == vhostIP {
+				return node
+			}
+		}
+	}
+	return nil
 }
 
 func connectTaps(g *graph.Graph, srcTap, destTap *graph.Node, destIP string) (flowType string, nh *NH, err error) {
@@ -236,126 +361,75 @@ func connectTaps(g *graph.Graph, srcTap, destTap *graph.Node, destIP string) (fl
 	if err != nil {
 		return "", nil, err
 	}
-	logging.GetLogger().Infof("@@@ START: srcVrf: %s, destIP: %s\n", srcVrf, destIP)
 	if srcVrf != destVrf {
 		flowType = "L3"
 		nh, err = lookupUcNH(strings.Split(vrIPs[0], "/")[0], srcVrf, destIP)
-		logging.GetLogger().Infof("@@@: Diff net, search uc table => nh: %+v\n", nh)
 	} else {
-		flowType = "L2"
 		mac, _ := destTap.GetFieldString("Contrail.MAC")
+		flowType = "L2"
 		nh, err = lookupL2NH(strings.Split(vrIPs[0], "/")[0], srcVrf, mac)
-		logging.GetLogger().Infof("@@@: Same net, search l2 table => nh: %+v\n", nh)
 	}
 	return
 }
 
-func newLink(parent, child *graph.Node, m graph.Metadata) Link {
-	m["Type"] = "overlay-flow"
-	return Link{string(parent.ID), string(child.ID), m}
-}
-
-func ipToTap(g *graph.Graph, ip string) (tap *graph.Node) {
-	for _, node := range g.GetNodes(graph.Metadata{"Type": "tun"}) {
-		cidrs, _ := node.GetFieldStringList("Neutron.IPV4")
-		for _, cidr := range cidrs {
-			tapIP := strings.Split(cidr, "/")[0]
-			if ip == tapIP {
-				return node
-			}
-		}
-	}
-	return nil
-}
-
-func ipToVhost(g *graph.Graph, ip string) (vhost *graph.Node) {
-	for _, node := range g.GetNodes(graph.Metadata{"Type": "vhost"}) {
-		cidrs, _ := node.GetFieldStringList("IPV4")
-		for _, cidr := range cidrs {
-			vhostIP := strings.Split(cidr, "/")[0]
-			if ip == vhostIP {
-				return node
-			}
-		}
-	}
-	return nil
-}
-
-func tracePath(g *graph.Graph, srcIP, destIP string) ([]Link, error) {
-	var links []Link
+func tracePath(g *graph.Graph, srcIP, destIP string) (path *Path) {
+	path = &Path{links: make([]Link, 0), err: nil}
 	// Get required nodes. If any of these nodes are missing,
 	// the lookup operation should fail immediately
-	srcTap := ipToTap(g, srcIP)
+	srcTap := getTapFromIP(g, srcIP)
 	if srcTap == nil {
-		return nil, fmt.Errorf("Tap interface with IP %s not found", srcIP)
+		path.err = fmt.Errorf("tap interface with IP %s not found", srcIP)
+		return
 	}
-	destTap := ipToTap(g, destIP)
+	destTap := getTapFromIP(g, destIP)
 	if destTap == nil {
-		return nil, fmt.Errorf("Tap interface with IP %s not found", destIP)
-	}
-	srcVM := g.LookupFirstChild(srcTap, graph.Metadata{"Type": "libvirt"})
-	if srcVM == nil {
-		tapName, _ := srcTap.GetFieldString("Name")
-		return nil, fmt.Errorf("VM attached to tap %s not found", tapName)
-	}
-	destVM := g.LookupFirstChild(destTap, graph.Metadata{"Type": "libvirt"})
-	if destVM == nil {
-		tapName, _ := destTap.GetFieldString("Name")
-		return nil, fmt.Errorf("VM attached to tap %s not found", tapName)
+		path.err = fmt.Errorf("tap interface with IP %s not found", destIP)
+		return
 	}
 	// The first link is always from srcVM to srcTap
-	links = append(links, newLink(srcVM, srcTap, graph.Metadata{"Description": "vm-to-tap"}))
-
+	srcVM := g.LookupFirstChild(srcTap, graph.Metadata{"Type": "libvirt"})
+	path.connect(srcVM, srcTap, graph.Metadata{"Label": "vm-to-tap"})
 	flowType, nh, err := connectTaps(g, srcTap, destTap, destIP)
 	for node := srcTap; node != destTap; {
 		if err != nil {
-			return nil, err
+			path.err = err
+			return
 		}
 		switch {
 		case nh.Type == "interface":
-			tapName, _ := destTap.GetFieldString("Name")
-			logging.GetLogger().Infof("@@@: END: Arrived at: %s\n", tapName)
 			// "interface" type indicates that nh is the destTap interface
-			var m graph.Metadata
-			if nodeType, _ := node.GetFieldString("Type"); nodeType == "vhost" {
-				m = links[len(links)-1].Metadata
-			} else {
-				m = graph.Metadata{"Description": "tap-to-tap"}
-			}
-			links = append(links, newLink(node, destTap, m))
+			tapName, _ := destTap.GetFieldString("Name")
+			logging.GetLogger().Debugf("Trace Path: Arrived at: %s\n", tapName)
+			path.connect(node, destTap, graph.Metadata{"Label": "overlay"})
 			node = destTap
 		case nh.Type == "tunnel":
-			logging.GetLogger().Infof("@@@: ECAP TUNNEL: %+v\n", nh)
 			// "tunnel" type indicates that nh is the vhost interface on another compute node
-			vhost := ipToVhost(g, nh.SrcIP)
+			logging.GetLogger().Debugf("Trace Path: Tunnel nh: %+v\n", nh)
+			vhost := getVhostFromIP(g, nh.SrcIP)
 			if vhost == nil {
-				return nil, fmt.Errorf("vHost with IP %s not found", nh.SrcIP)
+				path.err = fmt.Errorf("vHost with IP %s not found", nh.SrcIP)
+				return
 			}
-			host := getHostNode(g, vhost)
-			nextVhost := ipToVhost(g, nh.DestIP)
+			nextVhost := getVhostFromIP(g, nh.DestIP)
 			if nextVhost == nil {
-				return nil, fmt.Errorf("vHost with IP %s not found", nh.DestIP)
+				path.err = fmt.Errorf("vHost with IP %s not found", nh.DestIP)
+				return
 			}
-			nextHost := getHostNode(g, nextVhost)
-			m := graph.Metadata{"Description": "overlay-tunnel", "TunnelType": nh.TunType}
-
+			metadata := graph.Metadata{"Description": "overlay", "TunnelType": nh.TunType}
 			if nh.TunType == "VXLAN" {
-				m["VNI"] = nh.VNI
+				metadata["VNI"] = nh.VNI
 				nh, err = lookupVxlanNH(nh.DestIP, nh.VNI)
 			} else {
-				m["Label"] = nh.Label
+				metadata["Label"] = nh.Label
 				nh, err = lookupMplsNH(nh.DestIP, nh.Label)
 			}
-			links = append(
-				links,
-				newLink(node, vhost, m),
-				newLink(vhost, host, m),
-				newLink(host, nextHost, m),
-				newLink(nextHost, nextVhost, m),
-			)
+			path.connect(node, vhost, graph.Metadata{"Label": "overlay"})
+			connectVhosts(path, g, vhost, nextVhost, metadata)
 			node = nextVhost
 		case nh.Type == "vrf":
-			logging.GetLogger().Infof("@@@: VRF TRANSLATE: %+v\n", nh)
+			// "vrf" type indicates that we need to translate nh
+			// when we are at a different compute node
+			logging.GetLogger().Debugf("Trace Path: Vrf translate nh: %+v\n", nh)
 			if flowType == "L3" {
 				nh, err = lookupUcNH(nh.VrouterIP, nh.Vrf, destIP)
 			} else {
@@ -363,26 +437,23 @@ func tracePath(g *graph.Graph, srcIP, destIP string) ([]Link, error) {
 				nh, err = lookupL2NH(nh.VrouterIP, nh.Vrf, destMAC)
 			}
 		case nh.Type == "discard":
-			return nil, nil
+			path.err = fmt.Errorf("connection is discarded by vrouter")
+			return
 		default:
-			// There's a indirect route from source to destination IP
-			logging.GetLogger().Infof("@@@: Unknown NH: %+v\n", nh)
-			links = []Link{
-				links[0],
-				newLink(srcTap, destTap, graph.Metadata{"Description": "unknown"}),
-			}
+			// There's a indirect route from source to destination IP (through service instances, for example)
+			logging.GetLogger().Debugf("Trace Path: Unknown NH: %+v\n", nh)
+			path.connect(srcTap, destTap, graph.Metadata{"Label": "unknown"})
 			node = destTap
 		}
 	}
-	links = append(links, newLink(destTap, destVM, graph.Metadata{"Description": "tap-to-vm"}))
-	logging.GetLogger().Info("tupm: function result:", links)
-	return links, nil
+	destVM := g.LookupFirstChild(destTap, graph.Metadata{"Type": "libvirt"})
+	path.connect(destTap, destVM, graph.Metadata{"Label": "tap-to-vm"})
+	return
 }
 
 func (tf *TungstenFabricAPI) pathTracingHandler(w http.ResponseWriter, r *auth.AuthenticatedRequest) {
 	// TODO: Add validator
 	//
-
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
 	values := r.URL.Query()
@@ -390,15 +461,11 @@ func (tf *TungstenFabricAPI) pathTracingHandler(w http.ResponseWriter, r *auth.A
 		return
 	}
 	srcIP, destIP := values["src-ip"][0], values["dest-ip"][0]
-	links, err := tracePath(tf.graph, srcIP, destIP)
-	if err != nil {
-		logging.GetLogger().Error(err)
+	path := tracePath(tf.graph, srcIP, destIP)
+	if path.err != nil {
+		logging.GetLogger().Error(path.err)
 	}
-	// Bypass the marshalling nil slices behaviour
-	if len(links) == 0 {
-		links = make([]Link, 0)
-	}
-	je, _ := json.Marshal(links)
+	je, _ := json.Marshal(path.links)
 	w.Write(je)
 }
 
