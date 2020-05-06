@@ -268,6 +268,7 @@ func NewServerFromConfig() (*Server, error) {
 	}
 
 	uiServer.RegisterLoginRoute(apiAuthBackend)
+	uiServer.RegisterLogoutRoute(apiAuthBackend)
 
 	peers, err := config.GetAnalyzerServiceAddresses()
 	if err != nil {

@@ -177,6 +177,7 @@ func NewAgent() (*Agent, error) {
 
 	uiServer := ui.NewServer(hserver, config.GetString("ui.extra_assets"))
 	uiServer.RegisterLoginRoute(apiAuthBackend)
+	uiServer.RegisterLogoutRoute(apiAuthBackend)
 
 	if err = hserver.Listen(); err != nil {
 		return nil, err

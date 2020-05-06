@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	auth "github.com/abbot/go-http-auth"
 	shttp "github.com/skydive-project/skydive/http"
@@ -244,6 +245,54 @@ func (s *Server) RegisterLoginRoute(authBackend shttp.AuthenticationBackend) {
 	//     description: Unauthorized
 
 	s.httpServer.Router.HandleFunc("/login", s.serveLoginHandlerFunc(authBackend))
+}
+
+func deleteCookie(w http.ResponseWriter, name string) {
+	c := &http.Cookie{
+		Name:    name,
+		Value:   "",
+		Path:    "/",
+		Expires: time.Unix(0, 0),
+	}
+	http.SetCookie(w, c)
+}
+
+func (s *Server) serveLogout(w http.ResponseWriter, r *http.Request, authBackend shttp.AuthenticationBackend) {
+	shttp.SetTLSHeader(w, r)
+	if r.Method == "POST" {
+		deleteCookie(w, "authtok")
+		deleteCookie(w, "permissions")
+	}
+	return
+}
+
+func (s *Server) serveLogoutHandlerFunc(authBackend shttp.AuthenticationBackend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.serveLogout(w, r, authBackend)
+	}
+}
+
+// RegisterLogoutRoute registers the logout route with the provided auth backend
+func (s *Server) RegisterLogoutRoute(authBackend shttp.AuthenticationBackend) {
+	// swagger:operation POST /logout logout
+	//
+	// Logout
+	//
+	// ---
+	// summary: Logout
+	//
+	// tags:
+	// - Logout
+	//
+	// schemes:
+	// - http
+	// - https
+	//
+	// responses:
+	//   200:
+	//     description: Logout successful
+
+	s.httpServer.Router.HandleFunc("/logout", s.serveLogoutHandlerFunc(authBackend))
 }
 
 // NewServer returns a new Web server that serves the Skydive UI
