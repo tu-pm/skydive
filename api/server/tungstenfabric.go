@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/skydive-project/skydive/logging"
+	"github.com/skydive-project/skydive/rbac"
 	"github.com/skydive-project/skydive/topology"
 	"github.com/tu-pm/contrail-introspect-cli/collection"
 	"github.com/tu-pm/contrail-introspect-cli/descriptions"
@@ -117,25 +118,31 @@ func connectVhosts(p *Path, g *graph.Graph, srcVhost, destVhost *graph.Node, met
 		srcSwitch  = vhostToSwitch(g, srcVhost)
 		destSwitch = vhostToSwitch(g, destVhost)
 	)
+
+	p.connect(srcVhost, srcHost, metadata)
+	defer p.connect(destHost, destVhost, metadata)
+
+	// If srcSwitch or destSwitch does not exist, just connect two hosts without drawing a path through intermediate switches
 	if srcSwitch.node == nil || destSwitch.node == nil {
 		p.connect(srcHost, destHost, metadata)
 		return
 	}
 
-	p.connect(srcVhost, srcHost, metadata)
-	for _, port := range srcSwitch.ports {
-		p.connect(srcHost, port, metadata)
-	}
+	// for _, port := range srcSwitch.ports {
+	// 	p.connect(srcHost, port, metadata)
+	// }
+	p.connect(srcHost, srcSwitch.node, metadata)
 
 	// Connect underlay topology
 	if srcSwitch.node.ID != destSwitch.node.ID {
-		p.connectSwitches(g, srcSwitch.node, destSwitch.node, "", "")
+		// p.connectSwitches(g, srcSwitch.node, destSwitch.node, "", "")
+		p.connect(srcSwitch.node, destSwitch.node, metadata)
 	}
 
-	for _, port := range destSwitch.ports {
-		p.connect(port, destHost, metadata)
-	}
-	p.connect(destHost, destVhost, metadata)
+	// for _, port := range destSwitch.ports {
+	// 	p.connect(port, destHost, metadata)
+	// }
+	p.connect(destSwitch.node, destHost, metadata)
 }
 
 func (p *Path) connectSwitches(g *graph.Graph, srcSw, destSw *graph.Node, srcAddr, destAddr string) {
@@ -177,14 +184,16 @@ func lookupL2NH(vrIP, vrfName, mac string) (nh *NH, err error) {
 	if err != nil {
 		return nil, err
 	}
-	nhType, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
-	vrf, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
-	sourceIP, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
-	destIP, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
-	itf, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
-	tunType, _ := elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/tunnel_type")
-	label, _ := elem.GetField("path_list/list/PathSandeshData[1]/label")
-	vni, _ := elem.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
+	var (
+		nhType, _   = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/type")
+		vrf, _      = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/vrf")
+		sourceIP, _ = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/sip")
+		destIP, _   = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/dip")
+		itf, _      = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/itf")
+		tunType, _  = elem.GetField("path_list/list/PathSandeshData[1]/nh/NhSandeshData/tunnel_type")
+		label, _    = elem.GetField("path_list/list/PathSandeshData[1]/label")
+		vni, _      = elem.GetField("path_list/list/PathSandeshData[1]/vxlan_id")
+	)
 
 	nh = &NH{
 		VrouterIP: vrIP,
@@ -219,10 +228,12 @@ func lookupUcNH(vrIP, vrfName, ip string) (*NH, error) {
 		maxLen    = -1
 	)
 	for _, elem := range elems {
-		srcIp, _ := elem.GetField("src_ip")
-		srcPlen, _ := elem.GetField("src_plen")
-		prefLen, _ := strconv.Atoi(srcPlen)
-		matchLen, _ := compareIP(ip, srcIp, prefLen)
+		var (
+			srcIP, _    = elem.GetField("src_ip")
+			srcPlen, _  = elem.GetField("src_plen")
+			prefLen, _  = strconv.Atoi(srcPlen)
+			matchLen, _ = compareIP(ip, srcIP, prefLen)
+		)
 		if matchLen > maxLen {
 			maxLen = matchLen
 			matchElem = elem
@@ -393,6 +404,7 @@ func tracePath(g *graph.Graph, srcIP, destIP string) (path *Path) {
 	for node := srcTap; node != destTap; {
 		if err != nil {
 			path.err = err
+			path.links = make([]Link, 0)
 			return
 		}
 		switch {
@@ -452,15 +464,23 @@ func tracePath(g *graph.Graph, srcIP, destIP string) (path *Path) {
 }
 
 func (tf *TungstenFabricAPI) pathTracingHandler(w http.ResponseWriter, r *auth.AuthenticatedRequest) {
-	// TODO: Add validator
-	//
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusOK)
-	values := r.URL.Query()
-	if len(values["src-ip"]) != 1 || len(values["dest-ip"]) != 1 {
+	if !rbac.Enforce(r.Username, "topology", "read") {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	srcIP, destIP := values["src-ip"][0], values["dest-ip"][0]
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.WriteHeader(http.StatusOK)
+
+	r.ParseForm()
+	var (
+		srcIPForm  = r.Form["srcIP"]
+		destIPForm = r.Form["destIP"]
+		srcIP      string
+		destIP     string
+	)
+	if len(srcIPForm) != 0 && len(destIPForm) != 0 {
+		srcIP, destIP = srcIPForm[0], destIPForm[0]
+	}
 	path := tracePath(tf.graph, srcIP, destIP)
 	if path.err != nil {
 		logging.GetLogger().Error(path.err)
@@ -473,7 +493,7 @@ func (tf *TungstenFabricAPI) registerEndpoints(r *shttp.Server, authBackend shtt
 	routes := []shttp.Route{
 		{
 			Name:        "TungstenFabricPathTracer",
-			Method:      "GET",
+			Method:      "POST",
 			Path:        "/api/tungstenfabric",
 			HandlerFunc: tf.pathTracingHandler,
 		},
