@@ -128,10 +128,11 @@ func connectVhosts(p *Path, g *graph.Graph, srcVhost, destVhost *graph.Node, met
 		return
 	}
 
-	// for _, port := range srcSwitch.ports {
-	// 	p.connect(srcHost, port, metadata)
-	// }
-	p.connect(srcHost, srcSwitch.node, metadata)
+	for _, port := range srcSwitch.ports {
+		p.connect(srcHost, port, metadata)
+		p.connect(port, srcSwitch.node, metadata)
+	}
+	// p.connect(srcHost, srcSwitch.node, metadata)
 
 	// Connect underlay topology
 	if srcSwitch.node.ID != destSwitch.node.ID {
@@ -139,10 +140,11 @@ func connectVhosts(p *Path, g *graph.Graph, srcVhost, destVhost *graph.Node, met
 		p.connect(srcSwitch.node, destSwitch.node, metadata)
 	}
 
-	// for _, port := range destSwitch.ports {
-	// 	p.connect(port, destHost, metadata)
-	// }
-	p.connect(destSwitch.node, destHost, metadata)
+	for _, port := range destSwitch.ports {
+		p.connect(destSwitch.node, port, metadata)
+		p.connect(port, destHost, metadata)
+	}
+	// p.connect(destSwitch.node, destHost, metadata)
 }
 
 func (p *Path) connectSwitches(g *graph.Graph, srcSw, destSw *graph.Node, srcAddr, destAddr string) {
