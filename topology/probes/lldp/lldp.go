@@ -77,6 +77,7 @@ type Probe struct {
 	wg            sync.WaitGroup       // capture goroutines wait group
 	autoDiscovery bool                 // capture LLDP traffic on all capable interfaces
 	linkWatcher   *Watcher             // store the last moment an LLDP packet arrived on each link
+	ignoreDCBX    bool                 // ignore dcbx packets
 }
 
 // Watcher keeps track on frequently updated elements
@@ -224,6 +225,15 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		if lldpLayerInfo := packet.Layer(layers.LayerTypeLinkLayerDiscoveryInfo); lldpLayerInfo != nil {
 			lldpLayerInfo := lldpLayerInfo.(*layers.LinkLayerDiscoveryInfo)
+
+			// Don't process DCBX packets
+			if p.ignoreDCBX {
+				for _, tlv := range lldpLayerInfo.OrgTLVs {
+					if tlv.OUI == layers.IEEEOUIDCBX {
+						return
+					}
+				}
+			}
 
 			if portDescription := lldpLayerInfo.PortDescription; portDescription != "" {
 				portLLDPMetadata.Description = portDescription
@@ -533,6 +543,7 @@ func (p *Probe) Stop() {
 func NewProbe(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
 	var (
 		interfaces  = ctx.Config.GetStringSlice("agent.topology.lldp.interfaces")
+		ignoreDCBX  = ctx.Config.GetBool("agent.topology.lldp.ignore_dcbx")
 		timeoutStr  = ctx.Config.GetString("agent.topology.lldp.timeout")
 		intervalStr = ctx.Config.GetString("agent.topology.lldp.interval")
 		watcher     = &Watcher{elements: make(map[graph.Identifier]time.Time), quit: make(chan bool)}
@@ -560,6 +571,7 @@ func NewProbe(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
 		state:         service.StoppedState,
 		autoDiscovery: len(interfaces) == 0,
 		linkWatcher:   watcher,
+		ignoreDCBX:    ignoreDCBX,
 	}, nil
 }
 
