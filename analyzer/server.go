@@ -385,6 +385,7 @@ func NewServerFromConfig() (*Server, error) {
 	api.RegisterPcapAPI(httpServer, s.flowStorage, apiAuthBackend)
 	api.RegisterConfigAPI(httpServer, apiAuthBackend)
 	api.RegisterWorkflowCallAPI(httpServer, apiAuthBackend, apiServer, g, tr)
+	api.RegisterTungstenFabricAPI(httpServer, g, apiAuthBackend)
 
 	if config.GetBool("analyzer.ssh_enabled") {
 		if err := dede.RegisterHandler("terminal", "/dede", httpServer.Router); err != nil {

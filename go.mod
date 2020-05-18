@@ -90,6 +90,7 @@ require (
 	github.com/tebeka/go2xunit v1.4.10
 	github.com/tebeka/selenium v0.0.0-20170314201507-657e45ec600f
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
+	github.com/tu-pm/contrail-introspect-cli v0.0.0-20200227073603-496c1f55f10c
 	github.com/vishvananda/netlink v1.0.0
 	github.com/vishvananda/netns v0.0.0-20190625233234-7109fa855b0f
 	github.com/voxelbrain/goptions v0.0.0-20180630082107-58cddc247ea2 // indirect
