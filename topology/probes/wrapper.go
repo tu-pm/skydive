@@ -117,3 +117,8 @@ func (p *ProbeWrapper) Stop() {
 func NewProbeWrapper(handler handler) *ProbeWrapper {
 	return &ProbeWrapper{sm: newServiceManager(handler, 3*time.Second)}
 }
+
+// NewProbeWrapperWithDuration returns a new probe wrapper from a given interval
+func NewProbeWrapperWithDuration(handler handler, interval time.Duration) *ProbeWrapper {
+	return &ProbeWrapper{sm: newServiceManager(handler, interval)}
+}
