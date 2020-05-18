@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avast/retry-go"
+	retry "github.com/avast/retry-go"
 	"github.com/nlewo/contrail-introspect-cli/collection"
 	"github.com/nlewo/contrail-introspect-cli/descriptions"
 
@@ -122,9 +122,9 @@ func getVrfIDFromIntrospect(host string, port int, vrfName string) (vrfID int, e
 	if err != nil {
 		return
 	}
+	defer col.Close()
 	elem, err := col.SearchStrictUnique(vrfName)
 	if err != nil {
-		col.Close()
 		return 0, err
 	}
 	field, _ := elem.GetField("ucindex")
@@ -139,40 +139,31 @@ func getVrfIDFromIntrospect(host string, port int, vrfName string) (vrfID int, e
 }
 
 func (p *Probe) onVhostAdded(node *graph.Node, itf collection.Element) {
-	phyItf, _ := itf.GetField("physical_interface")
-	if phyItf == "" {
-		p.Ctx.Logger.Errorf("Physical interface not found")
-		return
-	}
-
 	p.vHost = node
 
-	m := graph.Metadata{"Name": phyItf}
-	nodes := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, m, graph.Metadata{"RelationType": "ownership"})
-	switch {
-	case len(nodes) == 0:
-		p.Ctx.Logger.Errorf("Physical interface %s not found", phyItf)
-		return
-	case len(nodes) > 1:
-		p.Ctx.Logger.Errorf("Multiple physical interfaces found : %v", nodes)
-		return
+	// Link parent interface to vhost if presents
+	parent, _ := itf.GetField("parent_interface")
+	if nodes := p.Ctx.Graph.LookupChildren(
+		p.Ctx.RootNode,
+		graph.Metadata{"Name": parent},
+		graph.Metadata{"RelationType": "ownership"},
+	); len(nodes) > 0 {
+		p.linkToVhost(nodes[0], graph.Metadata{"Tag": "vhost-to-parent"})
+		p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
 	}
 
-	p.linkToVhost(nodes[0])
-
+	// Link pending links to vhost
 	for _, n := range p.pendingLinks {
-		p.linkToVhost(n)
+		p.linkToVhost(n, nil)
 	}
 	p.pendingLinks = p.pendingLinks[:0]
-
-	p.Ctx.Graph.AddMetadata(nodes[0], "MPLSUDPPort", p.mplsUDPPort)
 }
 
-func (p *Probe) linkToVhost(node *graph.Node) {
+func (p *Probe) linkToVhost(node *graph.Node, m graph.Metadata) {
 	if p.vHost != nil {
 		if !topology.HaveLayer2Link(p.Ctx.Graph, node, p.vHost) {
 			p.Ctx.Logger.Debugf("Link %s to %s", node.String(), p.vHost.String())
-			topology.AddLayer2Link(p.Ctx.Graph, node, p.vHost, nil)
+			topology.AddLayer2Link(p.Ctx.Graph, node, p.vHost, m)
 		}
 	} else {
 		p.Ctx.Logger.Debugf("Add node %s to pending link list", node.String())
@@ -218,7 +209,7 @@ func (p *Probe) nodeUpdater() {
 			return
 		}
 
-		if tp, _ := node.GetFieldString("Type"); tp == "vhost" && strings.Contains(name, "vhost") {
+		if pt, _ := node.GetFieldString("Type"); pt == "vhost" && strings.Contains(name, "vhost") {
 			p.onVhostAdded(node, itf)
 		} else {
 			p.Ctx.Logger.Debugf("Retrieve extIDs for %s", name)
@@ -227,7 +218,7 @@ func (p *Probe) nodeUpdater() {
 				return
 			}
 			p.updateNode(node, extIDs)
-			p.linkToVhost(node)
+			p.linkToVhost(node, nil)
 			p.OnInterfaceAdded(int(extIDs.VRFID), extIDs.UUID)
 		}
 
