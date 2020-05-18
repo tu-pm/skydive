@@ -189,3 +189,25 @@ func IsInterfaceUp(node *graph.Node) bool {
 	}
 	return false
 }
+
+// GetFirstEdge return the first edge connecting to a given node and matching given metadata
+func GetFirstEdge(g *graph.Graph, node *graph.Node, em graph.ElementMatcher) *graph.Edge {
+	edges := g.GetNodeEdges(node, em)
+	if len(edges) == 0 {
+		return nil
+	}
+	return edges[0]
+}
+
+// GetPeer returns the neighbor of current node if it matches given matcher
+func GetPeer(g *graph.Graph, node *graph.Node, edge *graph.Edge, f graph.ElementMatcher) *graph.Node {
+	peerID := edge.Parent
+	if node.ID == edge.Parent {
+		peerID = edge.Child
+	}
+	peer := g.GetNode(peerID)
+	if peer != nil && !peer.MatchMetadata(f) {
+		return nil
+	}
+	return peer
+}
