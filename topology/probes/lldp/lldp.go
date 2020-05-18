@@ -25,6 +25,7 @@ import (
 	"net"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/google/gopacket"
@@ -43,20 +44,36 @@ import (
 )
 
 /*
-#include <linux/if_packet.h>  // packet_mreq
-#include <linux/if_ether.h>  // ETH_ALEN
+ #include <linux/if_packet.h>  // packet_mreq
+ #include <linux/if_ether.h>  // ETH_ALEN
 */
 import "C"
 
 const lldpBPFFilter = `ether[0] & 1 = 1 and
-  ether proto 0x88cc and
-  !(ether src %s) and
-  (ether dst 01:80:c2:00:00:0e or
-   ether dst 01:80:c2:00:00:03 or
-   ether dst 01:80:c2:00:00:00)`
+   ether proto 0x88cc and
+   !(ether src %s) and
+   (ether dst 01:80:c2:00:00:0e or
+	ether dst 01:80:c2:00:00:03 or
+	ether dst 01:80:c2:00:00:00)`
 
 // Capture 8192 bytes so that we have the full Ethernet frame
 const lldpSnapLen = 8192
+
+const (
+	// SwitchUP describes switches having reachable management address
+	SwitchUP string = "UP"
+	// SwitchInaccessible describes switches having unreachable management address
+	SwitchInaccessible string = "INACCESSIBLE"
+	// SwitchDOWN describes switches that are no longer be discovered by its neighbors, and having inaccessible management address
+	SwitchDOWN string = "DOWN"
+)
+
+const (
+	// LinkActive when there are LLDP packets sending through it
+	LinkActive string = "ACTIVE"
+	// LinkInactive when there is no LLDP packets sending through it
+	LinkInactive string = "INACTIVE"
+)
 
 // Probe describes the probe that is in charge of listening for
 // LLDP packets on interfaces and create the corresponding chassis and port nodes
@@ -68,6 +85,65 @@ type Probe struct {
 	state         service.State        // state of the probe (running or stopped)
 	wg            sync.WaitGroup       // capture goroutines wait group
 	autoDiscovery bool                 // capture LLDP traffic on all capable interfaces
+	linkWatcher   *Watcher             // remember the last time an LLDP packet arrived on each link
+}
+
+// Watcher keeps track on frequently updated elements
+type Watcher struct {
+	sync.Mutex
+	elements map[graph.Identifier]time.Time // mapping between an element's ID and the last moment it was updated
+	interval time.Duration                  // watcher interval
+	timeout  time.Duration                  // drop element after timeout
+	quit     chan bool                      // stop watcher
+}
+
+// Start the main watcher loop
+func (w *Watcher) Start(g *graph.Graph, wg *sync.WaitGroup) {
+	ticker := time.NewTicker(w.interval)
+	go func() {
+		defer func() {
+			ticker.Stop()
+			wg.Done()
+		}()
+		for {
+			select {
+			case <-ticker.C:
+				now := time.Now().UTC()
+				g.Lock()
+				for id, last := range w.elements {
+					if now.Sub(last) < w.timeout {
+						continue
+					}
+					if link := g.GetEdge(id); link != nil {
+						g.AddMetadata(link, "State", LinkInactive)
+						w.DropElement(id)
+					}
+				}
+				g.Unlock()
+			case <-w.quit:
+				return
+			}
+		}
+	}()
+}
+
+// Stop watcher loop
+func (w *Watcher) Stop() {
+	w.quit <- true
+}
+
+// UpdateElement store the last time an element gets updated
+func (w *Watcher) UpdateElement(id graph.Identifier) {
+	w.Lock()
+	w.elements[id] = time.Now().UTC()
+	w.Unlock()
+}
+
+// DropElement lose track of an element
+func (w *Watcher) DropElement(id graph.Identifier) {
+	w.Lock()
+	delete(w.elements, id)
+	w.Unlock()
 }
 
 type ifreq struct {
@@ -128,6 +204,7 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 		chassisMetadata := graph.Metadata{
 			"LLDP":  chassisLLDPMetadata,
 			"Type":  "switch",
+			"State": SwitchUP,
 			"Probe": "lldp",
 		}
 
@@ -165,12 +242,11 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 			lldpLayerInfo := lldpLayerInfo.(*layers.LinkLayerDiscoveryInfo)
 
 			if portDescription := lldpLayerInfo.PortDescription; portDescription != "" {
-				// When using lldpd, the port description is the name of the interface
-				if portDescription == ifName {
-					return
-				}
 				portLLDPMetadata.Description = portDescription
-				portMetadata["Name"] = bytesToString([]byte(portDescription))
+				// Rename port to portDescription if portID is not InterfaceName
+				if portIDSubtype := lldpLayer.PortID.Subtype; portIDSubtype != layers.LLDPPortIDSubtypeIfaceName {
+					portMetadata["Name"] = bytesToString([]byte(portDescription))
+				}
 			}
 
 			if lldpLayerInfo.SysDescription != "" {
@@ -244,8 +320,6 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 			}
 		}
 
-		// TODO: Handle TTL (set port to down when timer expires ?)
-
 		p.Ctx.Graph.Lock()
 
 		// Create a node for the sending chassis with a predictable ID
@@ -259,6 +333,20 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 		chassisNodeID := graph.GenID(chassisDiscriminators...)
 		chassis := p.getOrCreate(chassisNodeID, chassisMetadata)
 
+		// Delete nodes with the same mgmt address
+		// Reason: MgmtAddress must be unique between switches
+		if mgmtAddress, _ := chassisMetadata.GetFieldString("LLDP.MgmtAddress"); len(mgmtAddress) > 0 {
+			dupSwitches := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": mgmtAddress})
+			for _, sw := range dupSwitches {
+				if sw != chassis {
+					for _, pt := range p.Ctx.Graph.LookupChildren(sw, nil, topology.OwnershipMetadata()) {
+						p.Ctx.Graph.DelNode(pt)
+					}
+					p.Ctx.Graph.DelNode(sw)
+				}
+			}
+		}
+
 		// Create a port with a predicatable ID
 		port := p.getOrCreate(graph.GenID(
 			string(chassisNodeID),
@@ -267,11 +355,16 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		if !topology.HaveOwnershipLink(p.Ctx.Graph, chassis, port) {
 			topology.AddOwnershipLink(p.Ctx.Graph, chassis, port, nil)
-			topology.AddLayer2Link(p.Ctx.Graph, chassis, port, nil)
 		}
 
-		if !topology.HaveLayer2Link(p.Ctx.Graph, port, n) {
-			topology.AddLayer2Link(p.Ctx.Graph, port, n, nil)
+		var err error
+		link := p.Ctx.Graph.GetFirstLink(port, n, topology.Layer2Metadata())
+		if link == nil {
+			link, err = topology.AddLayer2Link(p.Ctx.Graph, port, n, nil)
+		}
+		if err == nil {
+			p.linkWatcher.UpdateElement(link.ID)
+			p.Ctx.Graph.AddMetadata(link, "State", LinkActive)
 		}
 
 		p.Ctx.Graph.Unlock()
@@ -415,6 +508,9 @@ func (p *Probe) Start() error {
 	p.Lock()
 	defer p.Unlock()
 
+	p.wg.Add(1)
+	p.linkWatcher.Start(p.Ctx.Graph, &p.wg)
+
 	// The nodes may have already been created
 	children := p.Ctx.Graph.LookupChildren(p.Ctx.RootNode, nil, topology.OwnershipMetadata())
 	for _, intfNode := range children {
@@ -427,6 +523,7 @@ func (p *Probe) Start() error {
 // Stop capturing LLDP packets
 func (p *Probe) Stop() {
 	p.Ctx.Graph.RemoveEventListener(p)
+	p.linkWatcher.Stop()
 	p.state.Store(service.StoppingState)
 	for intf, activeProbe := range p.interfaceMap {
 		if activeProbe != nil {
@@ -439,11 +536,27 @@ func (p *Probe) Stop() {
 
 // NewProbe creates a new LLDP probe
 func NewProbe(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
-	interfaces := ctx.Config.GetStringSlice("agent.topology.lldp.interfaces")
-
+	var (
+		interfaces  = ctx.Config.GetStringSlice("agent.topology.lldp.interfaces")
+		timeoutStr  = ctx.Config.GetString("agent.topology.lldp.timeout")
+		intervalStr = ctx.Config.GetString("agent.topology.lldp.interval")
+		watcher     = &Watcher{elements: make(map[graph.Identifier]time.Time), quit: make(chan bool)}
+	)
 	interfaceMap := make(map[string]*gp.Probe)
 	for _, intf := range interfaces {
 		interfaceMap[intf] = nil
+	}
+
+	if timeout, err := time.ParseDuration(timeoutStr); err == nil {
+		watcher.timeout = timeout
+	} else {
+		watcher.timeout = 5 * time.Minute
+	}
+
+	if interval, err := time.ParseDuration(intervalStr); err == nil {
+		watcher.interval = interval
+	} else {
+		watcher.interval = 10 * time.Minute
 	}
 
 	return &Probe{
@@ -451,6 +564,7 @@ func NewProbe(ctx tp.Context, bundle *probe.Bundle) (probe.Handler, error) {
 		interfaceMap:  interfaceMap,
 		state:         service.StoppedState,
 		autoDiscovery: len(interfaces) == 0,
+		linkWatcher:   watcher,
 	}, nil
 }
 
