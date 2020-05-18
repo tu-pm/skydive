@@ -127,6 +127,22 @@ type Domain struct {
 	HostDevices []HostDev   `xml:"devices>hostdev"`
 }
 
+// Nova is the XML coding of nova metadata attached to a libvirt domain
+type Nova struct {
+	Namespace    string `xml:"nova,attr"`
+	Name         string `xml:"name"`
+	CreationTime string `xml:"creationTime"`
+	Flavor       struct {
+		Name string `xml:"name,attr"`
+	} `xml:"flavor"`
+	Source struct {
+		Type string `xml:"type,attr"`
+		ID   string `xml:"uuid,attr"`
+	} `xml:"root"`
+	User    string `xml:"owner>user"`
+	Project string `xml:"owner>project"`
+}
+
 // getDomainInterfaces uses libvirt to get information on the interfaces of a
 // domain.
 func (probe *Probe) getDomainInterfaces(
@@ -180,6 +196,34 @@ func (probe *Probe) getDomainInterfaces(
 		hostdevs = append(hostdevs, &hostdevObj)
 	}
 	return
+}
+
+func (probe *Probe) getNovaMetadata(domain domain) (graph.Metadata, error) {
+	nm := struct {
+		Metadata Nova `xml:"metadata>instance"`
+	}{}
+
+	rawXML, err := domain.GetXML()
+	if err != nil {
+		return graph.Metadata{}, err
+	}
+	err = xml.Unmarshal(rawXML, &nm)
+	if err != nil {
+		return graph.Metadata{}, err
+	}
+	nova := nm.Metadata
+	if len(nova.Namespace) == 0 {
+		return graph.Metadata{}, nil
+	}
+
+	return graph.Metadata{
+		"Name":         nova.Name,
+		"CreationTime": nova.CreationTime,
+		"Flavor":       nova.Flavor.Name,
+		"Source":       nova.Source.Type + ":" + nova.Source.ID,
+		"User":         nova.User,
+		"Project":      nova.Project,
+	}, nil
 }
 
 func (probe *Probe) makeHostDev(name string, source *Source) (node *graph.Node, err error) {
@@ -344,6 +388,18 @@ func (probe *Probe) createOrUpdateDomain(d domain) *graph.Node {
 	}
 
 	domainNode := probe.Ctx.Graph.LookupFirstNode(metadata)
+
+	nova, err := probe.getNovaMetadata(d)
+	if err != nil {
+		probe.Ctx.Logger.Errorf("Getting nova metadata error: %s", err)
+	}
+
+	if len(nova) > 0 {
+		metadata["Name"] = nova["Name"]
+		nova["InstanceName"] = domainName
+		metadata["Nova"] = nova
+	}
+
 	if domainNode == nil {
 		domainNode, err = probe.Ctx.Graph.NewNode(graph.GenID(), metadata)
 		if err != nil {
