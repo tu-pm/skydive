@@ -44,17 +44,17 @@ import (
 )
 
 /*
-#include <linux/if_packet.h>  // packet_mreq
-#include <linux/if_ether.h>  // ETH_ALEN
+ #include <linux/if_packet.h>  // packet_mreq
+ #include <linux/if_ether.h>  // ETH_ALEN
 */
 import "C"
 
 const lldpBPFFilter = `ether[0] & 1 = 1 and
-  ether proto 0x88cc and
-  !(ether src %s) and
-  (ether dst 01:80:c2:00:00:0e or
-   ether dst 01:80:c2:00:00:03 or
-   ether dst 01:80:c2:00:00:00)`
+   ether proto 0x88cc and
+   !(ether src %s) and
+   (ether dst 01:80:c2:00:00:0e or
+	ether dst 01:80:c2:00:00:03 or
+	ether dst 01:80:c2:00:00:00)`
 
 // Capture 8192 bytes so that we have the full Ethernet frame
 const lldpSnapLen = 8192
@@ -316,6 +316,20 @@ func (p *Probe) handlePacket(n *graph.Node, ifName string, packet gopacket.Packe
 
 		chassisNodeID := graph.GenID(chassisDiscriminators...)
 		chassis := p.getOrCreate(chassisNodeID, chassisMetadata)
+
+		// Delete nodes with the same mgmt address
+		// Reason: MgmtAddress must be unique between switches
+		if mgmtAddress, _ := chassisMetadata.GetFieldString("LLDP.MgmtAddress"); len(mgmtAddress) > 0 {
+			dupSwitches := p.Ctx.Graph.GetNodes(graph.Metadata{"LLDP.MgmtAddress": mgmtAddress})
+			for _, sw := range dupSwitches {
+				if sw != chassis {
+					for _, pt := range p.Ctx.Graph.LookupChildren(sw, nil, topology.OwnershipMetadata()) {
+						p.Ctx.Graph.DelNode(pt)
+					}
+					p.Ctx.Graph.DelNode(sw)
+				}
+			}
+		}
 
 		// Create a port with a predicatable ID
 		port := p.getOrCreate(graph.GenID(
