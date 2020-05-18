@@ -420,6 +420,10 @@ func (p *Probe) getOrCreate(id graph.Identifier, m graph.Metadata) *graph.Node {
 			p.Ctx.Logger.Error(err)
 		}
 	} else {
+		// Do not change chassisID
+		if cid, err := node.GetFieldString("LLDP.ChassisID"); err != nil {
+			m.SetField("LLDP.ChassisID", cid)
+		}
 		tr := p.Ctx.Graph.StartMetadataTransaction(node)
 		for k, v := range m {
 			tr.AddMetadata(k, v)
